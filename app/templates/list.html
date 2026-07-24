@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Bookings — Rental Dashboard{% endblock %}
+{% block content %}
+  <h1>Bookings</h1>
+
+  <section>
+    <h2>Active Bookings</h2>
+    {% if active_bookings %}
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Guest</th>
+          <th scope="col">Platform</th>
+          <th scope="col">Check-in</th>
+          <th scope="col">Check-out</th>
+          <th scope="col" class="num">Days Until</th>
+          <th scope="col">Status</th>
+          <th scope="col">Automations</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in active_bookings %}
+        {% set summary = task_summaries[b.id] %}
+        <tr>
+          <td><a href="/bookings/{{ b.id }}">{{ b.guest_first_name }} {{ b.guest_last_name }}</a></td>
+          <td><span class="badge badge-platform">{{ b.platform.value }}</span></td>
+          <td class="nowrap">{{ b.check_in_date }}</td>
+          <td class="nowrap">{{ b.check_out_date }}</td>
+          <td class="num">{{ (b.check_in_date - today).days }}</td>
+          <td>
+            <span class="badge badge-{{ summary.status }}">{{ summary.status.replace("_", " ") }}</span>
+          </td>
+          <td class="nowrap">
+            {{ summary.done }}/{{ summary.total }}
+            {% if summary.failed %}
+            <span class="badge badge-failed">{{ summary.failed }} failed</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p>No active bookings.</p>
+    <p>New bookings will appear here when emails are received.</p>
+    {% endif %}
+  </section>
+
+  <section class="secondary">
+    <h2>Recent Cancellations (last 30 days)</h2>
+    {% if cancelled_bookings %}
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Guest</th>
+          <th scope="col">Platform</th>
+          <th scope="col">Check-in</th>
+          <th scope="col">Check-out</th>
+          <th scope="col">Cancelled</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in cancelled_bookings %}
+        <tr>
+          <td><a href="/bookings/{{ b.id }}">{{ b.guest_first_name }} {{ b.guest_last_name }}</a></td>
+          <td><span class="badge badge-platform">{{ b.platform.value }}</span></td>
+          <td class="nowrap">{{ b.check_in_date }}</td>
+          <td class="nowrap">{{ b.check_out_date }}</td>
+          <td class="nowrap">{{ b.updated_at.strftime("%Y-%m-%d %H:%M") }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p>No recent cancellations.</p>
+    {% endif %}
+  </section>
+
+  <section class="secondary">
+    <h2>Recently Completed (last 30 days)</h2>
+    {% if completed_bookings %}
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Guest</th>
+          <th scope="col">Platform</th>
+          <th scope="col">Check-in</th>
+          <th scope="col">Check-out</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in completed_bookings %}
+        <tr>
+          <td><a href="/bookings/{{ b.id }}">{{ b.guest_first_name }} {{ b.guest_last_name }}</a></td>
+          <td><span class="badge badge-platform">{{ b.platform.value }}</span></td>
+          <td class="nowrap">{{ b.check_in_date }}</td>
+          <td class="nowrap">{{ b.check_out_date }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p>No recently completed stays.</p>
+    {% endif %}
+  </section>
+{% endblock %}

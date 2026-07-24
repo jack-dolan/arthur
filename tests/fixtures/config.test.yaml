@@ -1,0 +1,31 @@
+owners:
+  primary_name: "TestOwner"
+  cohost_name: "TestCohost"
+  # Full sign-off / From display name. Tests that assert the HOA From header
+  # derive it from here rather than hardcoding a real person's name.
+  primary_full_name: "TestOwner Example"
+
+email:
+  booking_feed: "feed@example.com"
+  alerts: "alerts@example.com"
+
+dashboard:
+  allowed_emails:
+    - "owner@example.com"
+    - "cohost@example.com"
+
+properties:
+  - id: "test_property"
+    hoa:
+      enabled: true
+      email: "hoa@example.com"
+      open_days: [1, 2, 3, 4, 5, 6]
+      email_window_days_min: 2
+      email_window_days_max: 7
+    cleaner_schedule:
+      type: "google_sheets"
+      spreadsheet_id: "fake-spreadsheet-id"
+      sheet_name: "Test Cleaner Sheet"
+      sentinel_pattern: "--- end ---"
+    seam_device_id: "test-device-id"
+    docusign_template_id: "test-template-id"

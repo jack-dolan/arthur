@@ -1,0 +1,61 @@
+# Private data — never commit
+example-emails/
+tests/fixtures/emails/
+config.yaml
+
+# Local-only private material — real guest PII (names, phones, emails,
+# confirmation codes) held for local tooling. Never committed; the files
+# inside carry their own regeneration instructions for a fresh clone.
+.secrets/
+
+# Database backups — plain-SQL pg_dump output contains real guest PII.
+# Never commit these (an accidental `git add -A` would publish guest data).
+# Alembic migrations are .py under alembic/versions/, so *.sql is safe to ignore.
+backup_*.sql
+*.sql
+
+# PDF-volume backups (F-A, bug hunt 2026-07-22) — signed HOA forms, real PII.
+pdfs_*.tar.gz
+
+# Claude Code — only the machine-local settings file is ignored. Shared
+# project material (.claude/skills/, .claude/settings.json, commands, hooks)
+# IS committed so it travels with the repo.
+.claude/settings.local.json
+
+# Environment / secrets
+.env
+.env.*
+!.env.template
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Docker
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# DocuSign test artifacts
+scripts/manual/.docusign_test_*

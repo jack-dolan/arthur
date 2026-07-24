@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Rental Dashboard{% endblock %}</title>
+  {# Root-relative, not url_for(): behind Caddy the app sees scheme=http, so an
+     absolute URL renders http:// inside an https:// page and is blocked as
+     mixed content. See tests/unit/test_template_assets.py. #}
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Rental Dashboard</h1>
+    <nav>
+      {% if request.session.get('user') %}
+        <a href="/">Bookings</a>
+        <span class="user">{{ request.session.get('user') }}</span>
+        <a href="/logout">Log out</a>
+      {% endif %}
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

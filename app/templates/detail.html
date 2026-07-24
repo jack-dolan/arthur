@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}{{ booking.guest_first_name }} {{ booking.guest_last_name }} — Booking{% endblock %}
+{% block content %}
+  <a href="/">&#8592; Back to bookings</a>
+
+  <h1>{{ booking.guest_first_name }} {{ booking.guest_last_name }}
+    <span class="badge badge-platform">{{ booking.platform.value }}</span>
+    <span class="badge badge-{{ summary.status }}">{{ summary.status.replace("_", " ") }}</span>
+  </h1>
+
+  <section>
+    <h2>Guest Info</h2>
+    {% set source_labels = {
+      "email_parse": "email parse",
+      "manual_entry": "manual entry",
+      "web_scrape": "web scrape",
+      "docusign_webhook": "DocuSign webhook",
+      "seam_api": "Seam API",
+      "system_default": "system default"
+    } %}
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Field</th>
+          <th scope="col">Value</th>
+          <th scope="col">Provenance</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>First Name</td>
+          <td>{{ booking.guest_first_name or "—" }}</td>
+          <td>{% if provenance.guest_first_name %}<small>{{ source_labels[provenance.guest_first_name.source.value] }} · {{ provenance.guest_first_name.recorded_at }}</small>{% else %}—{% endif %}</td>
+        </tr>
+        <tr>
+          <td>Last Name</td>
+          <td>{{ booking.guest_last_name or "—" }}</td>
+          <td>{% if provenance.guest_last_name %}<small>{{ source_labels[provenance.guest_last_name.source.value] }} · {{ provenance.guest_last_name.recorded_at }}</small>{% else %}—{% endif %}</td>
+        </tr>
+        <tr>
+          <td>Phone</td>
+          <td>{{ booking.guest_phone or "—" }}</td>
+          <td>{% if provenance.guest_phone %}<small>{{ source_labels[provenance.guest_phone.source.value] }} · {{ provenance.guest_phone.recorded_at }}</small>{% else %}—{% endif %}</td>
+        </tr>
+        <tr>
+          <td>Email</td>
+          <td>{{ booking.guest_email or "—" }}</td>
+          <td>{% if provenance.guest_email %}<small>{{ source_labels[provenance.guest_email.source.value] }} · {{ provenance.guest_email.recorded_at }}</small>{% else %}—{% endif %}</td>
+        </tr>
+        <tr>
+          <td>Check-in</td>
+          <td>{{ booking.check_in_date }}</td>
+          <td>{% if provenance.check_in_date %}<small>{{ source_labels[provenance.check_in_date.source.value] }} · {{ provenance.check_in_date.recorded_at }}</small>{% else %}—{% endif %}</td>
+        </tr>
+        <tr>
+          <td>Check-out</td>
+          <td>{{ booking.check_out_date }}</td>
+          <td>{% if provenance.check_out_date %}<small>{{ source_labels[provenance.check_out_date.source.value] }} · {{ provenance.check_out_date.recorded_at }}</small>{% else %}—{% endif %}</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  {% if hoa_pipeline %}
+  <section>
+    <h2>HOA Registration</h2>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Step</th>
+          <th scope="col">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Form sent to guest</td>
+          <td>
+            {% if hoa_pipeline.docusign_sent %}
+            <span class="badge badge-complete">sent</span>
+            {% if hoa_pipeline.docusign_sent_at %}<small>{{ hoa_pipeline.docusign_sent_at.strftime("%Y-%m-%d") }}</small>{% endif %}
+            {% else %}
+            <span class="badge badge-pending">not yet</span>
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td>Form signed by guest</td>
+          <td>
+            {% if hoa_pipeline.signed %}
+            <span class="badge badge-complete">signed &mdash; PDF on file</span>
+            {% else %}
+            <span class="badge badge-waiting_on_guest">not signed yet</span>
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td>Email to HOA <small>(window {{ hoa_pipeline.earliest }} &ndash; {{ hoa_pipeline.latest }})</small></td>
+          <td>
+            {% if hoa_pipeline.window_status == "sent" %}
+            <span class="badge badge-complete">sent</span>
+            {% if hoa_pipeline.hoa_sent_at %}<small>{{ hoa_pipeline.hoa_sent_at.strftime("%Y-%m-%d") }}</small>{% endif %}
+            {% elif hoa_pipeline.window_status == "before" %}
+            <span class="badge badge-scheduled">window opens {{ hoa_pipeline.earliest }}</span>
+            {% elif hoa_pipeline.window_status == "open" %}
+            {% if hoa_pipeline.signed %}
+            <span class="badge badge-scheduled">window open &mdash; sends within the hour</span>
+            {% else %}
+            <span class="badge badge-waiting_on_guest">window open &mdash; waiting on the signed form</span>
+            {% endif %}
+            {% else %}
+            <span class="badge badge-failed">window passed &mdash; will not auto-send; handle manually</span>
+            {% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+  {% endif %}
+
+  {% for group_name, types in task_groups.items() %}
+  {% set group_tasks = types | select("in", tasks_by_type) | list %}
+  {% if group_tasks %}
+  <section>
+    <h2>{{ group_name }}</h2>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Task</th>
+          <th scope="col">State</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for task_type in group_tasks %}
+        {% set task = tasks_by_type[task_type] %}
+        <tr>
+          <td>
+            {{ task_labels.get(task.task_type, task.task_type.value.replace("_", " ")) }}
+            {% if task.state.value == "failed" and task.last_error %}
+            <details>
+              <summary>Show error</summary>
+              <pre>{{ task.last_error }}</pre>
+            </details>
+            {% endif %}
+          </td>
+          <td>
+            {% if group_name == "Reminders" %}
+            <span class="badge badge-{{ task.state.value }}">{{ reminder_state_labels.get(task.state.value, task.state.value.replace("_", " ")) }}</span>
+            {% elif task.task_type.value == "access_code_create" and task.state.value == "complete" and access_code %}
+            <span class="badge badge-complete">complete: {{ access_code }}</span>
+            {% else %}
+            <span class="badge badge-{{ task.state.value }}">{{ task.state.value.replace("_", " ") }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+  {% endif %}
+  {% endfor %}
+
+  {% if booking.status.value == 'cancelled' %}
+  <section class="form-block">
+    <h2>Guest Contact Info</h2>
+    <p>This booking is cancelled — contact entry is disabled (it would trigger
+       the guest form, door code and cleaner-schedule automations).</p>
+  </section>
+  {% else %}
+  <section class="form-block">
+    <h2>Guest Contact Info</h2>
+    <form method="POST" action="/bookings/{{ booking.id }}/contact">
+      <div>
+        <label for="guest_phone">Guest Phone</label>
+        <input type="text" id="guest_phone" name="guest_phone"
+               value="{{ submitted_phone if submitted_phone is not none else (booking.guest_phone or '') }}"
+               {% if errors.get('guest_phone') %}aria-invalid="true" aria-describedby="err_phone"{% endif %}>
+        {% if errors.get('guest_phone') %}
+        <p class="error" id="err_phone">{{ errors.guest_phone }}</p>
+        {% endif %}
+      </div>
+      <div>
+        <label for="guest_email">Guest Email</label>
+        <input type="text" id="guest_email" name="guest_email"
+               value="{{ submitted_email if submitted_email is not none else (booking.guest_email or '') }}"
+               {% if errors.get('guest_email') %}aria-invalid="true" aria-describedby="err_email"{% endif %}>
+        {% if errors.get('guest_email') %}
+        <p class="error" id="err_email">{{ errors.guest_email }}</p>
+        {% endif %}
+      </div>
+      {% if booking.guest_phone is not none or booking.guest_email is not none %}
+      <div>
+        <label>
+          <input type="checkbox" name="confirm_overwrite" value="1" {% if confirm_overwrite %}checked{% endif %}>
+          Confirm change to a previously saved value (may re-create the door code or resend the guest form)
+        </label>
+        {% if errors.get('confirm_overwrite') %}
+        <p class="error" id="err_confirm">{{ errors.confirm_overwrite }}</p>
+        {% endif %}
+      </div>
+      {% endif %}
+      <button type="submit" class="btn-primary">Save Contact Info</button>
+    </form>
+  </section>
+  {% endif %}
+{% endblock %}

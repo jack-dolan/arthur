@@ -1,0 +1,44 @@
+# Copy this file to config.yaml and fill in real values.
+# config.yaml is gitignored and must never be committed.
+
+owners:
+  primary_name: "Owner A"           # First name; used in alert messages
+  cohost_name: "Owner B"            # Used in alert messages
+  primary_full_name: "Owner A Full" # Full name; HOA email sign-off + From display name (falls back to primary_name if unset)
+
+email:
+  booking_feed: "your-booking-feed@example.com"   # Receives forwarded Airbnb/VRBO emails; system-only
+  alerts: "your-alerts@example.com"               # Human-actionable notifications to both owners
+
+dashboard:
+  # Google accounts allowed to sign in to the owner dashboard (Sign in with
+  # Google). Anyone can authenticate; only these emails are authorized.
+  allowed_emails:
+    - "owner-a@example.com"
+    - "owner-b@example.com"
+
+properties:
+  - id: "property_1"
+    hoa:
+      enabled: true
+      email: "hoa-office@example.com"
+      open_days: [1, 2, 3, 4, 5, 6]    # 1=Mon … 6=Sat (closed Sunday)
+      email_window_days_min: 2          # Must email at least this many HOA-open days before check-in
+      email_window_days_max: 7          # Must not email earlier than this many days before check-in
+    cleaner_schedule:
+      type: "google_sheets"
+      spreadsheet_id: "your-google-sheets-spreadsheet-id-from-url"   # The ID in the sheet URL (NOT the tab name)
+      sheet_name: "Your Cleaner Schedule Sheet Name"
+      sentinel_pattern: "--- end ---"   # First-cell text of the end-sentinel row (case-insensitive). Change to match your real sheet.
+    seam_device_id: "your-seam-device-id"
+    docusign_template_id: "your-docusign-template-id"
+    docusign_signer_role: "signer"   # Must exactly match the role name in the DocuSign template (silent failure if wrong)
+
+# Add more properties below as needed:
+# - id: "property_2"
+#   hoa:
+#     enabled: false
+#   cleaner_schedule:
+#     type: "google_sheets"
+#     sheet_name: "..."
+#   seam_device_id: "..."

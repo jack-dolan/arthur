@@ -1,0 +1,382 @@
+/* ==========================================================================
+   Phase 3 Dashboard Stylesheet
+   UI-SPEC: Phase 3 Design Contract (03-UI-SPEC.md)
+   No CSS framework. No external imports. System font stack only.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Custom Properties (Color + State + Spacing tokens)
+   -------------------------------------------------------------------------- */
+
+:root {
+  /* Color tokens */
+  --color-bg: #ffffff;
+  --color-secondary: #f3f4f6;
+  --color-accent: #2563eb;
+  --color-destructive: #dc2626;
+  --color-border: #e5e7eb;
+
+  /* Task state badges — dark ink on a light tint.
+     White-on-fill was below WCAG AA at 13px (waiting 3.19:1, complete 3.30:1,
+     skipped 2.54:1). Every pair below is >= 6:1. */
+  --state-pending-ink: #374151;
+  --state-pending-tint: #f3f4f6;
+  --state-waiting-ink: #92400e;
+  --state-waiting-tint: #fef3c7;
+  --state-complete-ink: #166534;
+  --state-complete-tint: #dcfce7;
+  --state-in_progress-ink: #1e40af;
+  --state-in_progress-tint: #dbeafe;
+  --state-skipped-ink: #4b5563;
+  --state-skipped-tint: #f3f4f6;
+  --state-failed-ink: #991b1b;
+  --state-failed-tint: #fee2e2;
+  /* Derived booking statuses (badge-action_needed etc.) */
+  --state-action_needed-ink: #92400e;
+  --state-action_needed-tint: #fef3c7;
+  --state-waiting_on_guest-ink: #1e40af;
+  --state-waiting_on_guest-tint: #dbeafe;
+  --state-scheduled-ink: #134e4a;
+  --state-scheduled-tint: #ccfbf1;
+
+  --stripe: #f9fafb;
+
+  /* Spacing scale — multiples of 4px */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+}
+
+/* --------------------------------------------------------------------------
+   2. Base + Typography
+   -------------------------------------------------------------------------- */
+
+html, body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  background: var(--color-bg);
+  color: #111827;
+}
+
+body {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-2xl) var(--space-md);
+}
+
+h1 {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
+  margin-bottom: var(--space-lg);
+}
+
+h2 {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+  margin-top: var(--space-xl);
+  margin-bottom: var(--space-md);
+}
+
+h3 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+small,
+.label {
+  font-size: 13px;
+  line-height: 1.4;
+  color: #6b7280;
+}
+
+/* --------------------------------------------------------------------------
+   3. Layout Sections
+   -------------------------------------------------------------------------- */
+
+section {
+  margin-bottom: var(--space-xl);
+  padding: var(--space-md) 0;
+}
+
+section.secondary {
+  background: var(--color-secondary);
+  padding: var(--space-lg);
+  border-radius: 4px;
+}
+
+section.form-block {
+  border: 1px solid var(--color-border);
+  padding: var(--space-lg);
+  border-radius: 4px;
+  margin-top: var(--space-xl);
+}
+
+/* --------------------------------------------------------------------------
+   4. Tables
+   -------------------------------------------------------------------------- */
+
+/* Tables scroll inside their own wrapper so a wide table never forces the
+   whole page to scroll sideways on a phone. */
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}
+
+th,
+td {
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+th {
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #6b7280;
+  background: var(--color-secondary);
+  border-bottom: 2px solid var(--color-border);
+  white-space: nowrap;
+}
+
+tbody tr:nth-child(even) {
+  background: var(--stripe);
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: #eef2f7;
+}
+
+td.nowrap,
+th.nowrap {
+  white-space: nowrap;
+}
+
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------------------
+   5. Links
+   -------------------------------------------------------------------------- */
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* --------------------------------------------------------------------------
+   6. Badges — Platform and Task State
+   -------------------------------------------------------------------------- */
+
+.badge {
+  display: inline-block;
+  padding: 2px var(--space-sm);
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 600;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.badge-platform {
+  color: var(--state-in_progress-ink);
+  background: var(--state-in_progress-tint);
+}
+
+.badge-pending {
+  color: var(--state-pending-ink);
+  background: var(--state-pending-tint);
+}
+
+.badge-waiting {
+  color: var(--state-waiting-ink);
+  background: var(--state-waiting-tint);
+}
+
+.badge-complete {
+  color: var(--state-complete-ink);
+  background: var(--state-complete-tint);
+}
+
+.badge-in_progress {
+  color: var(--state-in_progress-ink);
+  background: var(--state-in_progress-tint);
+}
+
+.badge-skipped {
+  color: var(--state-skipped-ink);
+  background: var(--state-skipped-tint);
+}
+
+.badge-failed {
+  color: var(--state-failed-ink);
+  background: var(--state-failed-tint);
+}
+
+/* Derived booking statuses (list-view Status column) */
+.badge-action_needed {
+  color: var(--state-action_needed-ink);
+  background: var(--state-action_needed-tint);
+}
+
+.badge-waiting_on_guest {
+  color: var(--state-waiting_on_guest-ink);
+  background: var(--state-waiting_on_guest-tint);
+}
+
+.badge-scheduled {
+  color: var(--state-scheduled-ink);
+  background: var(--state-scheduled-tint);
+}
+
+/* --------------------------------------------------------------------------
+   7. Forms
+   -------------------------------------------------------------------------- */
+
+label {
+  display: block;
+  margin-bottom: var(--space-xs);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+input[type="text"],
+input[type="email"] {
+  padding: var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 16px;
+  width: 100%;
+  max-width: 360px;
+  box-sizing: border-box;
+}
+
+input.error,
+input[aria-invalid="true"] {
+  border-color: var(--color-destructive);
+}
+
+.btn-primary {
+  background: var(--color-accent);
+  color: #ffffff;
+  padding: var(--space-sm) var(--space-md);
+  border: none;
+  border-radius: 4px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: var(--space-md);
+}
+
+.btn-primary:hover {
+  background: #1d4ed8;
+}
+
+.error {
+  color: var(--color-destructive);
+  font-size: 13px;
+  margin-top: var(--space-xs);
+}
+
+/* --------------------------------------------------------------------------
+   8. Details / Summary (collapsed failed-task errors)
+   -------------------------------------------------------------------------- */
+
+details > summary {
+  cursor: pointer;
+  color: var(--color-accent);
+  font-size: 13px;
+}
+
+details > pre {
+  background: #f3f4f6;
+  padding: var(--space-sm);
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin-top: var(--space-xs);
+}
+
+/* --------------------------------------------------------------------------
+   9. Header
+   -------------------------------------------------------------------------- */
+
+header {
+  margin-bottom: var(--space-xl);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+header h1 {
+  margin-bottom: 0;
+}
+
+/* --------------------------------------------------------------------------
+   10. Responsive
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 640px) {
+  body {
+    padding: var(--space-lg) var(--space-md);
+  }
+
+  h1 {
+    font-size: 24px;
+  }
+
+  header nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    align-items: baseline;
+  }
+
+  header nav .user {
+    margin-left: 0;
+  }
+
+  section.secondary,
+  section.form-block {
+    padding: var(--space-md);
+  }
+}
+
+/* ── Login (Google OIDC) ─────────────────────────────────────────────────── */
+.login { max-width: 24rem; margin: 3rem auto; text-align: center; }
+.btn-google {
+  display: inline-block; margin-top: 1rem; padding: 0.6rem 1.2rem;
+  background: #1a73e8; color: #fff; text-decoration: none;
+  border-radius: 4px; font-weight: 600;
+}
+.btn-google:hover { background: #1558b0; }
+header nav .user { margin-left: 1rem; color: #666; font-size: 0.9rem; }

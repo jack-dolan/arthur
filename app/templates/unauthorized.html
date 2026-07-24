@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Not authorized — Rental Dashboard{% endblock %}
+{% block content %}
+<div class="login">
+  <h2>Not authorized</h2>
+  <p>{{ reason }}</p>
+  <p><a href="/login">Back to sign in</a></p>
+</div>
+{% endblock %}

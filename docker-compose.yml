@@ -1,0 +1,72 @@
+services:
+  app:
+    build: .
+    env_file: .env
+    # Bind to localhost only. Public traffic must go through Caddy (TLS), which
+    # reaches the app over the internal Docker network (app:8000) — it does not
+    # use this host publish. Publishing on 0.0.0.0 would expose the dashboard
+    # (and its session cookie) in plaintext HTTP on the public IP, bypassing TLS.
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - pdf_data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    # Caddy needs DOMAIN in its own environment — the Caddyfile reads
+    # {$DOMAIN:localhost} to decide which site to serve and which host to
+    # obtain a Let's Encrypt cert for. Without this the caddy container has no
+    # DOMAIN and silently falls back to "localhost" (no public cert).
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+      # Site blocks owned by the wedding-website deploy pipeline.
+      - /home/jack/caddy-sites:/etc/caddy/sites:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+    # Front proxy for the whole host: also joined to the wedding
+    # website network so it can reach wedding-app-1:8080.
+    networks:
+      - default
+      - wedding
+
+networks:
+  wedding:
+    external: true
+    name: wedding_default
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+  pdf_data:

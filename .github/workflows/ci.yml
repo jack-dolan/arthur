@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+
+    # The offline suite is credential-free but DB-backed: the integration tests
+    # create and drop the schema on a throwaway Postgres. Everything external
+    # (Gmail, DocuSign, Seam, Sheets) replays recorded responses -- see
+    # TESTING.md. Live tests are skipped unless RUN_LIVE=1, which CI never sets.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: rental_automation
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB: rental_automation_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rental_automation"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # The one knob: tests/conftest.py defaults the app's DATABASE_URL from it,
+      # so the fixture engine and the code under test share one database.
+      TEST_DATABASE_URL: postgresql+asyncpg://rental_automation:devpassword@127.0.0.1:5432/rental_automation_test
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.8"
+          enable-cache: true
+
+      - name: Install Python and dependencies
+        run: uv sync --extra dev --python 3.12
+
+      - name: Run the offline test suite
+        run: uv run pytest -q
+
+  privacy-scan:
+    name: privacy-scan
+    runs-on: ubuntu-latest
+
+    # This repo describes a real property and real bookings, so every published
+    # value is a reserved placeholder (RFC 2606 / 5737 / 3849, NANP 555). Both
+    # checks below match on SHAPE only: no list of names, addresses or other
+    # literals lives in this repo, so a scan config can never become an
+    # inventory of what it is protecting.
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Scan for credential-shaped secrets
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/scan:ro" \
+            ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            detect --no-git --source=/scan --redact --no-banner -v
+
+      - name: Scan for non-placeholder phones, IPs and email addresses
+        run: python3 .github/scripts/privacy_scan.py .

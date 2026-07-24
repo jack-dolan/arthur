@@ -1,0 +1,17 @@
+{
+  "_comment": "Hand-written recordings of Seam / DocuSign / Gmail responses, shaped like the real sandbox payloads, used to replay tests/integration/test_live_{seam,docusign,gmail}.py offline (no credentials). Values mirror the SHAPES proven live in the Phase 2 isolation tests (see GETTING-TO-PRODUCTION.md Session Log); the values themselves are synthetic placeholders, never real ids or addresses.",
+  "seam": {
+    "access_code_id": "11111111-2222-3333-4444-555555555555",
+    "device_id": "test-device-id"
+  },
+  "docusign": {
+    "access_token_len": 703,
+    "envelope_id": "00000000-0000-0000-0000-000000000000",
+    "status_after_send": "sent",
+    "combined_pdf_b64_prefix": "JVBERi0xLjQK"
+  },
+  "gmail": {
+    "alerts_profile_email": "alerts@example.com",
+    "sent_message_id": "0000000000000000"
+  }
+}

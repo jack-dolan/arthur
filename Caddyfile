@@ -1,0 +1,8 @@
+{$DOMAIN:localhost} {
+    reverse_proxy app:8000
+}
+
+# Additional sites on this host (currently the wedding website).
+# /etc/caddy/sites is owned by the wedding-website deploy pipeline
+# (~/Documents/workspace/wedding-website); keep this import in place.
+import /etc/caddy/sites/*.caddy
