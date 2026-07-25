@@ -14,8 +14,8 @@ It must handle:
 """
 from __future__ import annotations
 
-from datetime import date
 import email as email_lib
+from datetime import date
 from email import policy
 
 import pytest
@@ -104,11 +104,14 @@ def _make_airbnb_real_format_msg():
         "Send a message to confirm check-in details or welcome\n"
         "Alex.\n"
         "\n"
-        "https://www.airbnb.com/hosting/reservations/details/HMFAKE1234?isPending=true   Alex Riverstone\n"
+        "https://www.airbnb.com/hosting/reservations/details/HMFAKE1234?isPending=true   Alex River"
+        "stone\n"
         "                                                                               \n"
-        "                                                                               Identity verified · 8 reviews\n"
+        "                                                                               Identity ve"
+        "rified · 8 reviews\n"
         "                                                                               \n"
-        "                                                                               Somewhere, NJ\n"
+        "                                                                               Somewhere, "
+        "NJ\n"
         "\n"
         "COZY TEST CHALET|HOT TUB|SAUNA\n"
         "\n"
@@ -169,7 +172,7 @@ def test_parse_airbnb_real_format():
 
 def test_parse_airbnb_real_format_classifies_as_airbnb_booking():
     """The real-format message must also survive classification (poller entry point)."""
-    from app.ingestion.classifier import classify, EmailType
+    from app.ingestion.classifier import EmailType, classify
     assert classify(_make_airbnb_real_format_msg()) == EmailType.AIRBNB_BOOKING
 
 
@@ -293,7 +296,7 @@ def test_year_inference_same_month_uses_same_year():
 # ---------------------------------------------------------------------------
 
 def test_parse_raises_on_missing_confirmation_code():
-    from app.ingestion.parsers.airbnb import parse_airbnb_booking, AirbnbParseError
+    from app.ingestion.parsers.airbnb import AirbnbParseError, parse_airbnb_booking
     raw = (
         "From: Airbnb <automated@airbnb.com>\r\n"
         "Date: Mon, 18 May 2026 23:00:00 +0000\r\n"

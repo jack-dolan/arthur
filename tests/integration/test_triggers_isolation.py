@@ -52,7 +52,8 @@ from app.db.models import (
     TaskState,
     TaskType,
 )
-from app.db.session import AsyncSessionLocal, engine as app_engine
+from app.db.session import AsyncSessionLocal
+from app.db.session import engine as app_engine
 from app.ingestion.classifier import EmailType
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"

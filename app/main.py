@@ -78,7 +78,8 @@ _REQUIRED_CREDENTIALS = [
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _configure_logging()
-    if settings.secret_key == "insecure-default-change-in-production":
+    # S105: comparing against the placeholder IS the check that rejects it.
+    if settings.secret_key == "insecure-default-change-in-production":  # noqa: S105
         raise ValueError(
             "secret_key is set to the default placeholder. "
             "Set SECRET_KEY in .env before starting the server. "

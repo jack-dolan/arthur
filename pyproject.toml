@@ -38,6 +38,7 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.25.0",
     "pytest-cov>=6.0.0",
+    "ruff>=0.14.4",
 ]
 
 [build-system]
@@ -56,7 +57,42 @@ markers = [
 ]
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+# "S" is flake8-bandit: it is this project's SAST layer, so static security
+# analysis rides along with the linter instead of needing a second tool.
+select = ["E", "F", "I", "S"]
+
+# Suppressions are per-line (`# noqa: SNNN`, with the reason in a comment above)
+# everywhere in app/, so every production finding is an individual, reviewed
+# judgement. The entries below are the opposite case: whole rule families that
+# are structurally inapplicable to a tree, where per-line markers would be noise
+# rather than signal.
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    # `assert` is the entire point of a test. 1100+ occurrences.
+    "S101",
+    # Credential-shaped literals in tests are mandated placeholders, never real
+    # values -- see the privacy rules in CLAUDE.md and the testing-safely skill.
+    "S105",
+    "S106",
+    # Test harnesses shell out to git, bash and docker with literal argument
+    # lists (never a shell string, never interpolated input).
+    "S603",
+    "S607",
+    # "/tmp/..." here is a fixture string compared against a mock, not a file
+    # this process ever opens.
+    "S108",
+    # Several suites are organised in banner-separated sections and import what
+    # each section needs at its head. That is a deliberate readability choice in
+    # a test file, where it costs nothing.
+    "E402",
+]
+"scripts/manual/**" = [
+    # Operator-run credential helpers: urlopen targets are module constants
+    # (Google and DocuSign endpoints), and subprocess calls use literal argv.
+    "S310",
+    "S603",
+    "S607",
+]
 
 [tool.ruff]
 target-version = "py312"

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
@@ -101,7 +100,10 @@ async def test_handle_docusign_send_creates_envelope_and_stores_envelope_id():
 
     with (
         patch("app.tasks.handlers.docusign.get_envelope_api") as mock_api,
-        patch("app.tasks.handlers.docusign._get_property_config", return_value=_make_property_config()),
+        patch(
+            "app.tasks.handlers.docusign._get_property_config",
+            return_value=_make_property_config(),
+        ),
     ):
         mock_envelopes_api = MagicMock()
         mock_envelopes_api.create_envelope.return_value = MagicMock(envelope_id="env-123")
@@ -141,7 +143,11 @@ async def test_handle_docusign_send_uses_template_role_from_config():
 
     call_args = mock_envelopes_api.create_envelope.call_args
     # Inspect the envelope_definition passed to create_envelope
-    envelope_def = call_args.kwargs.get("envelope_definition") or call_args[1].get("envelope_definition") or call_args[0][1]
+    envelope_def = (
+        call_args.kwargs.get("envelope_definition")
+        or call_args[1].get("envelope_definition")
+        or call_args[0][1]
+    )
     role_names = [r.role_name for r in envelope_def.template_roles]
     assert "Guest" in role_names
 
@@ -157,7 +163,10 @@ async def test_handle_docusign_send_sets_7_day_reminder():
 
     with (
         patch("app.tasks.handlers.docusign.get_envelope_api") as mock_api,
-        patch("app.tasks.handlers.docusign._get_property_config", return_value=_make_property_config()),
+        patch(
+            "app.tasks.handlers.docusign._get_property_config",
+            return_value=_make_property_config(),
+        ),
     ):
         mock_envelopes_api = MagicMock()
         mock_envelopes_api.create_envelope.return_value = MagicMock(envelope_id="env-789")
@@ -166,7 +175,11 @@ async def test_handle_docusign_send_sets_7_day_reminder():
         await handle_docusign_send(booking, task, session)
 
     call_args = mock_envelopes_api.create_envelope.call_args
-    envelope_def = call_args.kwargs.get("envelope_definition") or call_args[1].get("envelope_definition") or call_args[0][1]
+    envelope_def = (
+        call_args.kwargs.get("envelope_definition")
+        or call_args[1].get("envelope_definition")
+        or call_args[0][1]
+    )
     assert envelope_def.notification.reminders.reminder_delay == "7"
 
 
@@ -181,7 +194,10 @@ async def test_handle_docusign_send_sets_status_sent_not_created():
 
     with (
         patch("app.tasks.handlers.docusign.get_envelope_api") as mock_api,
-        patch("app.tasks.handlers.docusign._get_property_config", return_value=_make_property_config()),
+        patch(
+            "app.tasks.handlers.docusign._get_property_config",
+            return_value=_make_property_config(),
+        ),
     ):
         mock_envelopes_api = MagicMock()
         mock_envelopes_api.create_envelope.return_value = MagicMock(envelope_id="env-abc")
@@ -190,7 +206,11 @@ async def test_handle_docusign_send_sets_status_sent_not_created():
         await handle_docusign_send(booking, task, session)
 
     call_args = mock_envelopes_api.create_envelope.call_args
-    envelope_def = call_args.kwargs.get("envelope_definition") or call_args[1].get("envelope_definition") or call_args[0][1]
+    envelope_def = (
+        call_args.kwargs.get("envelope_definition")
+        or call_args[1].get("envelope_definition")
+        or call_args[0][1]
+    )
     assert envelope_def.status == "sent"
 
 
@@ -213,7 +233,10 @@ async def test_handle_envelope_completed_downloads_pdf_to_booking_id_path():
         patch("app.tasks.handlers.docusign.get_envelope_api") as mock_api,
         patch("builtins.open", m),
         patch("app.tasks.handlers.docusign.hoa_window") as mock_hoa_window,
-        patch("app.tasks.handlers.docusign._get_property_config", return_value=_make_property_config()),
+        patch(
+            "app.tasks.handlers.docusign._get_property_config",
+            return_value=_make_property_config(),
+        ),
         patch("pathlib.Path.mkdir"),
         patch("app.tasks.handlers.docusign.send_hoa_email"),
         patch("app.tasks.handlers.docusign.get_alerts_service"),
@@ -246,7 +269,10 @@ async def test_handle_envelope_completed_stores_signed_pdf_path_on_booking():
         patch("app.tasks.handlers.docusign.get_envelope_api") as mock_api,
         patch("builtins.open", mock_open()),
         patch("app.tasks.handlers.docusign.hoa_window") as mock_hoa_window,
-        patch("app.tasks.handlers.docusign._get_property_config", return_value=_make_property_config()),
+        patch(
+            "app.tasks.handlers.docusign._get_property_config",
+            return_value=_make_property_config(),
+        ),
         patch("pathlib.Path.mkdir"),
         patch("app.tasks.handlers.docusign.send_hoa_email"),
         patch("app.tasks.handlers.docusign.get_alerts_service"),
@@ -280,7 +306,10 @@ async def test_handle_envelope_completed_triggers_hoa_immediately_if_in_window()
         patch("app.tasks.handlers.docusign.hoa_window") as mock_hoa_window,
         patch("app.tasks.handlers.docusign.send_hoa_email") as mock_hoa_send,
         patch("app.tasks.handlers.docusign.claim_task", new=_claim_emulator(booking)),
-        patch("app.tasks.handlers.docusign._get_property_config", return_value=_make_property_config()),
+        patch(
+            "app.tasks.handlers.docusign._get_property_config",
+            return_value=_make_property_config(),
+        ),
         patch("pathlib.Path.mkdir"),
         patch("app.tasks.handlers.docusign.get_alerts_service"),
         patch("app.tasks.handlers.docusign.load_config"),
@@ -313,7 +342,10 @@ async def test_handle_envelope_completed_hoa_trigger_skipped_if_too_early():
         patch("builtins.open", mock_open()),
         patch("app.tasks.handlers.docusign.hoa_window") as mock_hoa_window,
         patch("app.tasks.handlers.docusign.send_hoa_email") as mock_hoa_send,
-        patch("app.tasks.handlers.docusign._get_property_config", return_value=_make_property_config()),
+        patch(
+            "app.tasks.handlers.docusign._get_property_config",
+            return_value=_make_property_config(),
+        ),
         patch("pathlib.Path.mkdir"),
     ):
         mock_envelopes_api = MagicMock()
@@ -411,8 +443,14 @@ async def test_handle_envelope_completed_get_document_arg_order():
     with (
         patch("app.tasks.handlers.docusign.get_envelope_api") as mock_api,
         patch("builtins.open", mock_open()),
-        patch("app.tasks.handlers.docusign.hoa_window", return_value=(date(2099, 1, 1), date(2099, 12, 31))),
-        patch("app.tasks.handlers.docusign._get_property_config", return_value=_make_property_config()),
+        patch(
+            "app.tasks.handlers.docusign.hoa_window",
+            return_value=(date(2099, 1, 1), date(2099, 12, 31)),
+        ),
+        patch(
+            "app.tasks.handlers.docusign._get_property_config",
+            return_value=_make_property_config(),
+        ),
         patch("pathlib.Path.mkdir"),
     ):
         mock_envelopes_api = MagicMock()
@@ -456,7 +494,11 @@ async def test_handle_envelope_completed_hoa_send_idempotent_on_duplicate(tmp_pa
         ),
         patch("app.tasks.handlers.docusign._get_property_config", return_value=prop),
         patch("app.tasks.handlers.docusign.load_config", return_value=mock_config),
-        patch("app.tasks.handlers.docusign.get_alerts_service", return_value=MagicMock(), create=True),
+        patch(
+            "app.tasks.handlers.docusign.get_alerts_service",
+            return_value=MagicMock(),
+            create=True,
+        ),
         patch("app.tasks.handlers.docusign.claim_task", new=_claim_emulator(booking)),
         patch("app.tasks.handlers.docusign.send_hoa_email") as mock_send,
     ):
@@ -481,8 +523,9 @@ async def test_handle_envelope_completed_hoa_send_idempotent_on_duplicate(tmp_pa
 
 def test_void_envelope_idempotent_already_completed_returns_normally():
     """ApiException with status=400 (already in terminal state) is swallowed."""
-    from app.tasks.handlers.docusign import void_envelope_idempotent
     from docusign_esign.client.api_exception import ApiException
+
+    from app.tasks.handlers.docusign import void_envelope_idempotent
 
     with patch("app.tasks.handlers.docusign.get_envelope_api") as mock_api:
         mock_envelopes_api = MagicMock()
@@ -497,8 +540,9 @@ def test_void_envelope_idempotent_already_completed_returns_normally():
 
 def test_void_envelope_idempotent_409_already_voided_returns_normally():
     """ApiException with status=409 (already voided) is swallowed."""
-    from app.tasks.handlers.docusign import void_envelope_idempotent
     from docusign_esign.client.api_exception import ApiException
+
+    from app.tasks.handlers.docusign import void_envelope_idempotent
 
     with patch("app.tasks.handlers.docusign.get_envelope_api") as mock_api:
         mock_envelopes_api = MagicMock()
@@ -512,8 +556,9 @@ def test_void_envelope_idempotent_409_already_voided_returns_normally():
 
 def test_void_envelope_propagates_500():
     """ApiException with status=500 (server error) is re-raised."""
-    from app.tasks.handlers.docusign import void_envelope_idempotent
     from docusign_esign.client.api_exception import ApiException
+
+    from app.tasks.handlers.docusign import void_envelope_idempotent
 
     with patch("app.tasks.handlers.docusign.get_envelope_api") as mock_api:
         mock_envelopes_api = MagicMock()
@@ -537,7 +582,10 @@ def test_refresh_access_token_posts_to_sandbox_oauth_endpoint_by_default():
     mock_response.raise_for_status = MagicMock()
 
     with patch("app.integrations.docusign.client.settings") as mock_settings, \
-         patch("app.integrations.docusign.client.httpx.post", return_value=mock_response) as mock_post:
+         patch(
+             "app.integrations.docusign.client.httpx.post",
+             return_value=mock_response,
+         ) as mock_post:
         mock_settings.docusign_sandbox = True
         mock_settings.docusign_refresh_token = "rt"
         mock_settings.docusign_client_id = "cid"
@@ -551,14 +599,16 @@ def test_refresh_access_token_posts_to_sandbox_oauth_endpoint_by_default():
 
 def test_refresh_access_token_posts_to_production_oauth_endpoint_when_sandbox_false():
     """_refresh_access_token POSTs to production endpoint when docusign_sandbox=False."""
-    from app.integrations.docusign import client as ds_client
 
     mock_response = MagicMock()
     mock_response.json.return_value = {"access_token": "tok-prod", "expires_in": 3600}
     mock_response.raise_for_status = MagicMock()
 
     with patch("app.integrations.docusign.client.settings") as mock_settings, \
-         patch("app.integrations.docusign.client.httpx.post", return_value=mock_response) as mock_post:
+         patch(
+             "app.integrations.docusign.client.httpx.post",
+             return_value=mock_response,
+         ) as mock_post:
         mock_settings.docusign_sandbox = False
         mock_settings.docusign_refresh_token = "rt"
         mock_settings.docusign_client_id = "cid"
@@ -577,7 +627,10 @@ def test_refresh_access_token_uses_basic_auth_with_client_id_secret():
     mock_response.raise_for_status = MagicMock()
 
     with patch("app.integrations.docusign.client.settings") as mock_settings, \
-         patch("app.integrations.docusign.client.httpx.post", return_value=mock_response) as mock_post:
+         patch(
+             "app.integrations.docusign.client.httpx.post",
+             return_value=mock_response,
+         ) as mock_post:
         mock_settings.docusign_sandbox = True
         mock_settings.docusign_refresh_token = "rt"
         mock_settings.docusign_client_id = "cid"
@@ -612,9 +665,10 @@ def test_refresh_access_token_returns_access_token_string():
 
 def test_get_envelope_api_returns_tuple_of_api_and_account_id():
     """get_envelope_api returns (EnvelopesApi, settings.docusign_account_id)."""
+    import docusign_esign as ds
+
     from app.integrations.docusign.client import get_envelope_api
     from app.settings import settings
-    import docusign_esign as ds
 
     with patch("app.integrations.docusign.client._refresh_access_token", return_value="tok-abc"):
         result = get_envelope_api()
@@ -651,7 +705,10 @@ async def test_handle_envelope_completed_skips_unsigned_reminders():
         patch("app.tasks.handlers.docusign.get_envelope_api") as mock_api,
         patch("builtins.open", mock_open()),
         patch("app.tasks.handlers.docusign.hoa_window") as mock_hoa_window,
-        patch("app.tasks.handlers.docusign._get_property_config", return_value=_make_property_config()),
+        patch(
+            "app.tasks.handlers.docusign._get_property_config",
+            return_value=_make_property_config(),
+        ),
         patch("pathlib.Path.mkdir"),
         patch("app.tasks.handlers.docusign.send_hoa_email"),
         patch("app.tasks.handlers.docusign.get_alerts_service"),
@@ -693,7 +750,10 @@ async def test_handle_envelope_completed_sends_hoa_late_when_window_passed():
         patch("app.tasks.handlers.docusign.hoa_window") as mock_hoa_window,
         patch("app.tasks.handlers.docusign.send_hoa_email") as mock_hoa_send,
         patch("app.tasks.handlers.docusign.claim_task", new=_claim_emulator(booking)),
-        patch("app.tasks.handlers.docusign._get_property_config", return_value=_make_property_config()),
+        patch(
+            "app.tasks.handlers.docusign._get_property_config",
+            return_value=_make_property_config(),
+        ),
         patch("pathlib.Path.mkdir"),
         patch("app.tasks.handlers.docusign.get_alerts_service"),
         patch("app.tasks.handlers.docusign.load_config"),

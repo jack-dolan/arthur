@@ -87,8 +87,15 @@ def main() -> int:
 
         # 3. Verify.
         chk = httpx.post(f"{BASE}/workspaces/get", headers=headers, json={}, timeout=20)
-        still = chk.json().get("workspace", {}).get("is_suspended") if chk.status_code == 200 else "?"
-        print(f"\nUnsuspended {name!r} ({wid}). is_suspended now = {still} (get status {chk.status_code}).")
+        still = (
+            chk.json().get("workspace", {}).get("is_suspended")
+            if chk.status_code == 200
+            else "?"
+        )
+        print(
+            f"\nUnsuspended {name!r} ({wid}). is_suspended now = {still} "
+            f"(get status {chk.status_code})."
+        )
 
     return exit_code
 

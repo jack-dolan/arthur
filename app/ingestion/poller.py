@@ -46,10 +46,10 @@ from app.ingestion.alerts import (
     send_unparseable_email_alert,
 )
 from app.ingestion.classifier import EmailType, _effective_sender_and_subject, classify
-from app.monitoring import ping_heartbeat_async
 from app.ingestion.parsers.airbnb import AirbnbBookingData, parse_airbnb_booking
 from app.ingestion.parsers.vrbo import VrboBookingData, parse_vrbo_booking
 from app.integrations.gmail.oauth import get_alerts_service
+from app.monitoring import ping_heartbeat_async
 
 log = logging.getLogger(__name__)
 

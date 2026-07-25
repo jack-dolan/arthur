@@ -36,7 +36,9 @@ class Settings(BaseSettings):
     seam_api_key: str = ""
 
     # App
-    secret_key: str = "insecure-default-change-in-production"
+    # S105: this placeholder is a deliberate tripwire, not a hardcoded secret.
+    # main.py's lifespan refuses to start the server while it is still in force.
+    secret_key: str = "insecure-default-change-in-production"  # noqa: S105
     domain: str = "localhost"
     # Level for the "app" logger namespace. INFO keeps the operational record
     # (poller ingests, task dispatch, DocuSign webhook events) visible in

@@ -16,8 +16,8 @@ real VRBO booking emails.
 """
 from __future__ import annotations
 
-from datetime import date
 import email as email_lib
+from datetime import date
 from email import policy
 
 import pytest
@@ -203,7 +203,7 @@ def test_parse_synthetic_vrbo_dates_cross_month():
 # ---------------------------------------------------------------------------
 
 def test_parse_raises_on_missing_reservation_id():
-    from app.ingestion.parsers.vrbo import parse_vrbo_booking, VrboParseError
+    from app.ingestion.parsers.vrbo import VrboParseError, parse_vrbo_booking
     body = (
         "---------- Forwarded message ---------\r\n"
         "From: Test Guest <sender@messages.homeaway.com>\r\n"
@@ -260,8 +260,9 @@ def test_vrbo_cross_year_stay_checkin_gets_previous_year():
     """'Dec 30 - Jan 2, 2027' is a New Year's stay: check-in Dec 30 *2026*.
     The single trailing year used to be applied to BOTH dates, producing a
     check-in a year in the future and check_out < check_in."""
-    from app.ingestion.parsers.vrbo import parse_vrbo_booking
     from datetime import date
+
+    from app.ingestion.parsers.vrbo import parse_vrbo_booking
 
     result = parse_vrbo_booking(_vrbo_msg_with_dates("Dec 30 - Jan 2, 2027"))
     assert result.check_in_date == date(2026, 12, 30)
@@ -271,8 +272,9 @@ def test_vrbo_cross_year_stay_checkin_gets_previous_year():
 def test_vrbo_both_years_rendering_parses():
     """The explicit two-year rendering must parse too (it previously failed
     to match the regex entirely)."""
-    from app.ingestion.parsers.vrbo import parse_vrbo_booking
     from datetime import date
+
+    from app.ingestion.parsers.vrbo import parse_vrbo_booking
 
     result = parse_vrbo_booking(_vrbo_msg_with_dates("Dec 30, 2026 - Jan 2, 2027"))
     assert result.check_in_date == date(2026, 12, 30)

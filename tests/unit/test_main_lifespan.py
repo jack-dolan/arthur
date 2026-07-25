@@ -9,15 +9,13 @@ Plan 04 (05-04) — TDD RED gate.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-import pytest_asyncio
 
-from app.main import app, lifespan
-from app.tasks.scheduled import check_daily_reminders, check_hoa_window
 from app.ingestion.poller import poll_booking_feed
-
+from app.main import lifespan
+from app.tasks.scheduled import check_daily_reminders, check_hoa_window
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -432,6 +430,7 @@ def test_configure_logging_emits_app_info_records():
     import io
     import logging as _logging
     import sys as _sys
+
     from app.main import _configure_logging
 
     buf = io.StringIO()
@@ -448,6 +447,7 @@ def test_configure_logging_does_not_double_print_warnings():
     import io
     import logging as _logging
     import sys as _sys
+
     from app.main import _configure_logging
 
     buf = io.StringIO()
@@ -462,6 +462,7 @@ def test_configure_logging_does_not_double_print_warnings():
 def test_resolve_log_level_falls_back_to_info_on_garbage():
     """A malformed LOG_LEVEL must degrade to INFO, never crash the boot."""
     import logging as _logging
+
     from app.main import _resolve_log_level
 
     assert _resolve_log_level("DEBUG") == _logging.DEBUG
@@ -481,7 +482,8 @@ def test_configure_logging_is_idempotent():
     import io
     import logging as _logging
     import sys as _sys
-    from app.main import _configure_logging, _LOG_HANDLER_NAME
+
+    from app.main import _LOG_HANDLER_NAME, _configure_logging
 
     buf = io.StringIO()
     with _isolated_app_logger() as app_logger:

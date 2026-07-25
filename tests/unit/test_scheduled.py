@@ -356,11 +356,12 @@ def test_reminder_matrix_has_six_entries():
 # D-01/D-04/D-05/D-06/D-07/D-08/D-13
 # ===========================================================================
 
-import pytest
 from contextlib import asynccontextmanager
 from datetime import datetime as _real_datetime
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
+
+import pytest
 
 # Fixed Eastern date used for async job tests — must be consistent with check_in_dates
 # on test bookings.  check_daily_reminders computes today_et = datetime.now(ET).date();
@@ -468,7 +469,9 @@ async def test_check_daily_reminders_calls_send_for_each_pending_match():
     # Email present so email tasks are SKIPPED; phone missing so phone tasks PENDING
     # DocuSign tasks PENDING (signed_pdf_path=None)
     # 7 days from FIXED_EASTERN_DATE: only 7d tasks fire (not 4d)
-    booking = _make_async_booking(7, guest_phone=None, guest_email="g@example.com", signed_pdf_path=None)
+    booking = _make_async_booking(
+        7, guest_phone=None, guest_email="g@example.com", signed_pdf_path=None
+    )
 
     mock_session_local, mock_session = _make_async_session_local([booking])
 
@@ -556,7 +559,9 @@ async def test_check_daily_reminders_flips_task_to_complete_after_send():
     from app.tasks.scheduled import check_daily_reminders
 
     # phone only missing, 7 days out; signed PDF present so docusign task won't fire
-    booking = _make_async_booking(7, guest_phone=None, guest_email="g@example.com", signed_pdf_path="/path/pdf")
+    booking = _make_async_booking(
+        7, guest_phone=None, guest_email="g@example.com", signed_pdf_path="/path/pdf"
+    )
 
     mock_session_local, mock_session = _make_async_session_local([booking])
 
@@ -591,11 +596,16 @@ async def test_check_daily_reminders_isolates_per_booking_failures(caplog):
     Patches datetime.now to FIXED_EASTERN_DT so bookings 7 days out trigger 7d reminders.
     """
     import logging
+
     from app.tasks.scheduled import check_daily_reminders
 
     # Both bookings: phone missing, 7 days from fixed Eastern date, signed PDF present
-    booking1 = _make_async_booking(7, guest_phone=None, guest_email="g@example.com", signed_pdf_path="/pdf")
-    booking2 = _make_async_booking(7, guest_phone=None, guest_email="g@example.com", signed_pdf_path="/pdf")
+    booking1 = _make_async_booking(
+        7, guest_phone=None, guest_email="g@example.com", signed_pdf_path="/pdf"
+    )
+    booking2 = _make_async_booking(
+        7, guest_phone=None, guest_email="g@example.com", signed_pdf_path="/pdf"
+    )
 
     mock_session_local, mock_session = _make_async_session_local([booking1, booking2])
 
@@ -648,7 +658,9 @@ async def test_check_daily_reminders_uses_eastern_date():
     from app.tasks.scheduled import check_daily_reminders
 
     # Booking 7 days out from FIXED_EASTERN_DATE (= TODAY_ET in _make_booking)
-    booking = _make_async_booking(7, guest_phone=None, guest_email="g@example.com", signed_pdf_path="/pdf")
+    booking = _make_async_booking(
+        7, guest_phone=None, guest_email="g@example.com", signed_pdf_path="/pdf"
+    )
 
     mock_session_local, mock_session = _make_async_session_local([booking])
 
@@ -733,11 +745,13 @@ async def test_check_hoa_window_skips_when_signed_pdf_path_none():
 
 @pytest.mark.asyncio
 async def test_check_hoa_window_isolates_per_booking_failures(caplog):
-    """handle_hoa_email raising on first booking does not abort processing second booking (Pattern 4).
+    """handle_hoa_email raising on first booking does not abort processing
+    second booking (Pattern 4).
 
     No exception escapes check_hoa_window().
     """
     import logging
+
     from app.tasks.scheduled import check_hoa_window
 
     booking1 = _make_booking(10, signed_pdf_path="/app/data/pdfs/x.pdf")

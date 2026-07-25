@@ -12,7 +12,7 @@ Requirements covered:
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -27,7 +27,11 @@ from app.db.models import (
 )
 
 
-def _make_booking(*, guest_phone: str | None = "+15551234999", guest_email: str | None = "guest@example.com"):
+def _make_booking(
+    *,
+    guest_phone: str | None = "+15551234999",
+    guest_email: str | None = "guest@example.com",
+):
     """Create a minimal in-memory Booking for Seam handler tests."""
     return Booking(
         id=uuid.uuid4(),
@@ -45,7 +49,9 @@ def _make_booking(*, guest_phone: str | None = "+15551234999", guest_email: str 
     )
 
 
-def _make_task(task_type: TaskType = TaskType.ACCESS_CODE_CREATE, state: TaskState = TaskState.PENDING):
+def _make_task(
+    task_type: TaskType = TaskType.ACCESS_CODE_CREATE, state: TaskState = TaskState.PENDING
+):
     return BookingTask(
         id=uuid.uuid4(),
         task_type=task_type,

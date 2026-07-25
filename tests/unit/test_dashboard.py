@@ -12,8 +12,6 @@ import uuid
 from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from app.db.models import (
     Booking,
     BookingStatus,
@@ -85,7 +83,7 @@ def test_validate_email_rejects_no_at():
 
 
 def test_empty_string_coerced_to_none():
-    from app.routers.dashboard import _validate_phone, _validate_email
+    from app.routers.dashboard import _validate_email, _validate_phone
     assert _validate_phone("") is None
     assert _validate_email("") is None
 
@@ -204,8 +202,8 @@ def test_flip_tasks_never_touches_fired_reminders():
 # ---------------------------------------------------------------------------
 
 async def test_dispatch_called_after_commit():
-    import asyncio
     from fastapi import Request
+
     from app.routers.dashboard import save_contact
 
     booking = _make_booking(guest_email=None, guest_phone=None)
@@ -246,7 +244,7 @@ async def test_dispatch_called_after_commit():
 # ---------------------------------------------------------------------------
 
 def test_provenance_map_returns_most_recent():
-    from app.routers.dashboard import _build_provenance_map, PROVENANCE_FIELDS
+    from app.routers.dashboard import PROVENANCE_FIELDS, _build_provenance_map
 
     booking = _make_booking()
     t1 = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
@@ -306,6 +304,7 @@ def test_task_group_assignment_exhaustive():
 async def test_save_contact_returns_303_on_success():
     from fastapi import Request
     from fastapi.responses import RedirectResponse
+
     from app.routers.dashboard import save_contact
 
     booking = _make_booking(guest_email=None, guest_phone=None)

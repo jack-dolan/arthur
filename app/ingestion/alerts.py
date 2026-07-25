@@ -103,7 +103,10 @@ def build_cancellation_alert(booking: Any, *, dashboard_base_url: str) -> tuple[
     check_in = booking.check_in_date.strftime("%b %-d, %Y")
     detail_url = f"{dashboard_base_url.rstrip('/')}/bookings/{booking.id}"
 
-    subject = f"Cancelled {platform_label} Booking — {guest_name} ({check_in}) — manual cleanup needed"
+    subject = (
+        f"Cancelled {platform_label} Booking — {guest_name} ({check_in}) "
+        "— manual cleanup needed"
+    )
 
     lines = [
         f"This {platform_label} booking has been cancelled.",
@@ -646,7 +649,7 @@ def build_reminder_alert(
                 "Please enter it as soon as possible."
             )
         lines = [
-            f"Reminder: the guest's phone number is still missing for the following booking.",
+            "Reminder: the guest's phone number is still missing for the following booking.",
             "",
             f"  Guest:      {guest_name}",
             f"  Check-in:   {check_in}",
@@ -658,7 +661,8 @@ def build_reminder_alert(
             "How to find the phone number:",
             routing,
             "",
-            "Enter the phone number on the booking's dashboard page to unblock the access code setup.",
+            "Enter the phone number on the booking's dashboard page to unblock "
+            "the access code setup.",
         ]
 
     elif task_type in _EMAIL_TASK_TYPES:
@@ -684,7 +688,7 @@ def build_reminder_alert(
                 "Please enter it as soon as possible."
             )
         lines = [
-            f"Reminder: the guest's email address is still missing for the following booking.",
+            "Reminder: the guest's email address is still missing for the following booking.",
             "",
             f"  Guest:      {guest_name}",
             f"  Check-in:   {check_in}",
@@ -712,7 +716,7 @@ def build_reminder_alert(
                 "Please follow up if needed."
             )
         lines = [
-            f"Reminder: the DocuSign guest form for this booking has not been signed yet.",
+            "Reminder: the DocuSign guest form for this booking has not been signed yet.",
             "",
             f"  Guest:      {guest_name}",
             f"  Check-in:   {check_in}",

@@ -12,9 +12,9 @@ of the packaged one — exactly the slim-container case that broke the deploy.
 """
 
 import importlib.metadata
+from zoneinfo import ZoneInfo
 
 import pytest
-from zoneinfo import ZoneInfo
 
 
 def test_tzdata_package_is_installed():

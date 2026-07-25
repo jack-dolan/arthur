@@ -25,12 +25,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-
-import httpx
 from datetime import UTC, date, datetime, timedelta
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+import httpx
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import selectinload
 
@@ -46,11 +45,11 @@ from app.db.models import (
 from app.db.session import AsyncSessionLocal
 from app.ingestion.alerts import (
     send_access_code_problem_alert,
-    send_docusign_keepalive_failure_alert,
-    send_reminder_alert,
     send_classifier_drift_digest,
     send_credential_sentinel_alert,
+    send_docusign_keepalive_failure_alert,
     send_monthly_status_report,
+    send_reminder_alert,
     send_stalled_automations_alert,
 )
 from app.integrations.gmail.oauth import get_alerts_service, get_booking_feed_service
@@ -724,7 +723,8 @@ async def complete_past_bookings() -> None:
 # Credential sentinel (sustainability audit 2026-07-23, item 3)
 # ===========================================================================
 
-_GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+# S105 is a false positive: Google's public, documented token endpoint, not a secret.
+_GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"  # noqa: S105
 
 
 def _check_gmail_booking_feed() -> None:

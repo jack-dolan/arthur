@@ -1,8 +1,6 @@
 """Unit tests for SQLAlchemy model shape (no DB required)."""
 from __future__ import annotations
 
-import pytest
-
 
 def test_platform_enum_has_airbnb_and_vrbo():
     from app.db.models import Platform
@@ -94,9 +92,11 @@ def test_booking_has_relationships_to_tasks_and_data_points():
 
 
 def test_booking_task_table_columns_and_fk():
-    from app.db.models import BookingTask, Booking
+    from app.db.models import BookingTask
     cols = {c.name: c for c in BookingTask.__table__.columns}
-    for name in ("id", "booking_id", "task_type", "state", "attempt_count", "created_at", "updated_at"):
+    for name in (
+        "id", "booking_id", "task_type", "state", "attempt_count", "created_at", "updated_at"
+    ):
         assert name in cols
         assert cols[name].nullable is False, f"{name} should be NOT NULL"
     for name in ("external_ref", "last_error", "completed_at"):

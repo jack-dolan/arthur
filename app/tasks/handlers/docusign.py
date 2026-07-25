@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import docusign_esign as ds
@@ -89,7 +89,8 @@ async def handle_docusign_send(
     signer = ds.TemplateRole(
         email=booking.guest_email,
         name=f"{booking.guest_first_name} {booking.guest_last_name}",
-        # role_name MUST match the role in the DocuSign template; silent failure if wrong (RESEARCH Risk 3)
+        # role_name MUST match the role in the DocuSign template; silent failure
+        # if wrong (RESEARCH Risk 3)
         role_name=prop.docusign_signer_role,
     )
 

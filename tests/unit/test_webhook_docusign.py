@@ -96,7 +96,8 @@ def test_extract_legacy_flat_payload_still_works():
 @pytest.mark.asyncio
 async def test_webhook_rejects_missing_signature_header_returns_400():
     """POST with no X-DocuSign-Signature-1 header → 400."""
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
+
     from app.main import app
 
     body = _make_webhook_body("completed")
@@ -112,7 +113,8 @@ async def test_webhook_rejects_missing_signature_header_returns_400():
 @pytest.mark.asyncio
 async def test_webhook_rejects_invalid_signature_returns_400():
     """POST with wrong HMAC signature → 400; no state side effects."""
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
+
     from app.main import app
 
     body = _make_webhook_body("completed")
@@ -131,8 +133,10 @@ async def test_webhook_rejects_invalid_signature_returns_400():
 @pytest.mark.asyncio
 async def test_webhook_accepts_valid_signature_returns_200():
     """POST with correct HMAC signature → 200."""
-    from httpx import AsyncClient, ASGITransport
-    from unittest.mock import patch, AsyncMock
+    from unittest.mock import patch
+
+    from httpx import ASGITransport, AsyncClient
+
     from app.main import app
 
     body = _make_webhook_body("voided")  # voided → log-and-ignore, no DB writes
@@ -161,8 +165,10 @@ async def test_webhook_reads_raw_body_before_json_parse():
     This test confirms the handler accepts raw bytes by successfully processing
     a request where we control the exact bytes sent.
     """
-    from httpx import AsyncClient, ASGITransport
     from unittest.mock import patch
+
+    from httpx import ASGITransport, AsyncClient
+
     from app.main import app
 
     # Use non-JSON bytes to prove raw body is captured (HMAC is over raw bytes)
@@ -190,9 +196,12 @@ async def test_webhook_reads_raw_body_before_json_parse():
 
 @pytest.mark.asyncio
 async def test_webhook_completed_status_triggers_envelope_completed_handler():
-    """Valid HMAC + status='completed' → handle_envelope_completed called with booking, task, envelope_id."""
-    from unittest.mock import MagicMock, patch, AsyncMock
-    from httpx import AsyncClient, ASGITransport
+    """Valid HMAC + status='completed' → handle_envelope_completed called with
+    booking, task, envelope_id."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from httpx import ASGITransport, AsyncClient
+
     from app.main import app
 
     env_id = "env-webhook-complete"
@@ -218,7 +227,9 @@ async def test_webhook_completed_status_triggers_envelope_completed_handler():
     with (
         patch("app.routers.webhooks.settings") as mock_settings,
         patch("app.routers.webhooks.AsyncSessionLocal", return_value=mock_session_cm),
-        patch("app.routers.webhooks.handle_envelope_completed", new_callable=AsyncMock) as mock_handler,
+        patch(
+            "app.routers.webhooks.handle_envelope_completed", new_callable=AsyncMock
+        ) as mock_handler,
     ):
         mock_settings.docusign_hmac_key = TEST_SECRET
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -243,8 +254,10 @@ async def test_webhook_completed_status_triggers_envelope_completed_handler():
 @pytest.mark.asyncio
 async def test_webhook_declined_status_sets_docusign_task_failed():
     """Valid HMAC + status='declined' → DOCUSIGN_SEND task transitions to FAILED."""
-    from httpx import AsyncClient, ASGITransport
-    from unittest.mock import patch, AsyncMock
+    from unittest.mock import AsyncMock, patch
+
+    from httpx import ASGITransport, AsyncClient
+
     from app.main import app
 
     env_id = "env-webhook-declined"
@@ -253,7 +266,9 @@ async def test_webhook_declined_status_sets_docusign_task_failed():
 
     with (
         patch("app.routers.webhooks.settings") as mock_settings,
-        patch("app.routers.webhooks.handle_envelope_declined", new_callable=AsyncMock) as mock_handler,
+        patch(
+            "app.routers.webhooks.handle_envelope_declined", new_callable=AsyncMock
+        ) as mock_handler,
     ):
         mock_settings.docusign_hmac_key = TEST_SECRET
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -273,8 +288,10 @@ async def test_webhook_declined_status_sets_docusign_task_failed():
 @pytest.mark.asyncio
 async def test_webhook_unknown_status_logs_and_returns_200():
     """Valid HMAC + status='delivered' (unknown) → 200; no exception; no DB writes."""
-    from httpx import AsyncClient, ASGITransport
-    from unittest.mock import patch, AsyncMock
+    from unittest.mock import patch
+
+    from httpx import ASGITransport, AsyncClient
+
     from app.main import app
 
     body = _make_webhook_body("delivered")

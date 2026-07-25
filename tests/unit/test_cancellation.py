@@ -38,7 +38,9 @@ from app.db.models import (
 )
 
 
-def _make_booking_with_tasks(task_overrides: dict[TaskType, tuple[TaskState, str | None]] | None = None):
+def _make_booking_with_tasks(
+    task_overrides: dict[TaskType, tuple[TaskState, str | None]] | None = None,
+):
     """Create an in-memory Booking with a full task set, optionally overriding states."""
     booking = Booking(
         id=uuid.uuid4(),
@@ -71,9 +73,10 @@ def _make_booking_with_tasks(task_overrides: dict[TaskType, tuple[TaskState, str
 # ---------------------------------------------------------------------------
 
 def test_parse_airbnb_cancellation_code_from_subject():
-    from app.ingestion.cancellation import parse_cancellation_external_id
     import email as email_lib
     from email import policy as email_policy
+
+    from app.ingestion.cancellation import parse_cancellation_external_id
 
     raw = (
         "From: Airbnb <automated@airbnb.com>\r\n"
@@ -85,9 +88,10 @@ def test_parse_airbnb_cancellation_code_from_subject():
 
 
 def test_parse_vrbo_cancellation_id_from_subject():
-    from app.ingestion.cancellation import parse_cancellation_external_id
     import email as email_lib
     from email import policy as email_policy
+
+    from app.ingestion.cancellation import parse_cancellation_external_id
 
     raw = (
         "From: Vrbo <vrbo@partners.expediagroup.com>\r\n"
@@ -99,7 +103,8 @@ def test_parse_vrbo_cancellation_id_from_subject():
 
 
 def test_parse_cancellation_from_real_airbnb_fixture():
-    """Smoke test: parse_cancellation_external_id extracts a non-empty code from the real fixture."""
+    """Smoke test: parse_cancellation_external_id extracts a non-empty code
+    from the real fixture."""
     from app.ingestion.cancellation import parse_cancellation_external_id
     from tests.conftest import recorded_email_message
 
@@ -109,7 +114,8 @@ def test_parse_cancellation_from_real_airbnb_fixture():
 
 
 def test_parse_cancellation_from_real_vrbo_fixture():
-    """Smoke test: parse_cancellation_external_id extracts a non-empty VRBO ID from the real fixture."""
+    """Smoke test: parse_cancellation_external_id extracts a non-empty VRBO ID
+    from the real fixture."""
     from app.ingestion.cancellation import parse_cancellation_external_id
     from tests.conftest import recorded_email_message
 
@@ -128,7 +134,6 @@ async def test_state_a_no_docusign_no_seam_marks_cancelled_and_sends_alert():
     from app.ingestion.cancellation import _apply_cancellation
 
     booking = _make_booking_with_tasks()
-    alert_sent = {}
     session = AsyncMock()
 
     with (
@@ -293,9 +298,13 @@ async def test_apply_cancellation_alert_failure_does_not_abort_cancellation():
     with (
         patch("app.ingestion.cancellation.void_docusign_envelope") as mock_void,
         patch("app.ingestion.cancellation.delete_seam_access_code") as mock_seam,
-        patch("app.ingestion.cancellation.send_cancellation_alert", side_effect=RuntimeError("gmail down")),
+        patch(
+            "app.ingestion.cancellation.send_cancellation_alert",
+            side_effect=RuntimeError("gmail down"),
+        ),
     ):
-        await _apply_cancellation(booking, cancellation_msg_id="msg-cancel", session=session)  # must not raise
+        # must not raise
+        await _apply_cancellation(booking, cancellation_msg_id="msg-cancel", session=session)
 
     assert booking.status == BookingStatus.CANCELLED
     assert booking.cancellation_email_message_id == "msg-cancel"
@@ -318,7 +327,10 @@ async def test_apply_cancellation_void_failure_isolated():
     session = AsyncMock()
 
     with (
-        patch("app.ingestion.cancellation.void_docusign_envelope", side_effect=RuntimeError("ds down")),
+        patch(
+            "app.ingestion.cancellation.void_docusign_envelope",
+            side_effect=RuntimeError("ds down"),
+        ),
         patch("app.ingestion.cancellation.delete_seam_access_code") as mock_seam,
         patch("app.ingestion.cancellation.send_cancellation_alert") as mock_alert,
     ):
@@ -341,7 +353,10 @@ async def test_apply_cancellation_seam_failure_isolated():
 
     with (
         patch("app.ingestion.cancellation.void_docusign_envelope"),
-        patch("app.ingestion.cancellation.delete_seam_access_code", side_effect=RuntimeError("seam down")),
+        patch(
+            "app.ingestion.cancellation.delete_seam_access_code",
+            side_effect=RuntimeError("seam down"),
+        ),
         patch("app.ingestion.cancellation.send_cancellation_alert") as mock_alert,
     ):
         await _apply_cancellation(booking, cancellation_msg_id="msg-c", session=session)
@@ -378,7 +393,8 @@ def test_delete_seam_access_code_calls_seam_sdk_delete():
 def test_void_docusign_envelope_signature_remains_sync():
     """Both void_docusign_envelope and delete_seam_access_code must be sync (not async)."""
     import asyncio
-    from app.ingestion.cancellation import void_docusign_envelope, delete_seam_access_code
+
+    from app.ingestion.cancellation import delete_seam_access_code, void_docusign_envelope
 
     assert not asyncio.iscoroutinefunction(void_docusign_envelope), (
         "void_docusign_envelope must remain a sync def (cancellation calls it without await)"
@@ -399,6 +415,7 @@ def test_send_cancellation_alert_sends_via_gmail_alerts_service():
     the (subject, body) builder runs for real.
     """
     import base64
+
     from app.ingestion.cancellation import send_cancellation_alert
 
     booking = _make_booking_with_tasks()
@@ -424,6 +441,7 @@ def test_send_cancellation_alert_sends_via_gmail_alerts_service():
 def test_send_cancellation_alert_is_sync():
     """send_cancellation_alert must stay sync — _apply_cancellation calls it without await."""
     import asyncio
+
     from app.ingestion.cancellation import send_cancellation_alert
     assert not asyncio.iscoroutinefunction(send_cancellation_alert)
 
@@ -434,7 +452,8 @@ def test_send_cancellation_alert_is_sync():
 
 @pytest.mark.asyncio
 async def test_apply_cancellation_completes_cancellation_alert_task_rows():
-    """_apply_cancellation marks OWNER_ALERT_CANCELLATION_HOA/_CLEANER COMPLETE (creating if absent)."""
+    """_apply_cancellation marks OWNER_ALERT_CANCELLATION_HOA/_CLEANER COMPLETE
+    (creating if absent)."""
     from app.ingestion.cancellation import _apply_cancellation
 
     booking = _make_booking_with_tasks()  # no cancellation-alert tasks in the default set
@@ -456,7 +475,8 @@ async def test_apply_cancellation_completes_cancellation_alert_task_rows():
 
 @pytest.mark.asyncio
 async def test_apply_cancellation_reuses_existing_alert_task_rows():
-    """If the cancellation-alert task rows already exist, they are flipped to COMPLETE (not duplicated)."""
+    """If the cancellation-alert task rows already exist, they are flipped to
+    COMPLETE (not duplicated)."""
     from app.ingestion.cancellation import _apply_cancellation
 
     booking = _make_booking_with_tasks(task_overrides={
@@ -473,7 +493,9 @@ async def test_apply_cancellation_reuses_existing_alert_task_rows():
         await _apply_cancellation(booking, cancellation_msg_id="msg-cancel", session=session)
 
     hoa_rows = [t for t in booking.tasks if t.task_type == TaskType.OWNER_ALERT_CANCELLATION_HOA]
-    cleaner_rows = [t for t in booking.tasks if t.task_type == TaskType.OWNER_ALERT_CANCELLATION_CLEANER]
+    cleaner_rows = [
+        t for t in booking.tasks if t.task_type == TaskType.OWNER_ALERT_CANCELLATION_CLEANER
+    ]
     assert len(hoa_rows) == 1 and hoa_rows[0].state == TaskState.COMPLETE
     assert len(cleaner_rows) == 1 and cleaner_rows[0].state == TaskState.COMPLETE
 

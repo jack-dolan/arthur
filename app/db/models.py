@@ -14,7 +14,6 @@ from datetime import date, datetime
 from sqlalchemy import (
     Date,
     DateTime,
-    Enum as SAEnum,
     ForeignKey,
     Index,
     Integer,
@@ -22,6 +21,9 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -75,9 +77,13 @@ class DataPointSource(str, enum.Enum):
 
 
 _platform_enum = SAEnum(Platform, name="platform", values_callable=lambda e: [m.value for m in e])
-_status_enum = SAEnum(BookingStatus, name="booking_status", values_callable=lambda e: [m.value for m in e])
+_status_enum = SAEnum(
+    BookingStatus, name="booking_status", values_callable=lambda e: [m.value for m in e]
+)
 _task_type_enum = SAEnum(TaskType, name="task_type", values_callable=lambda e: [m.value for m in e])
-_task_state_enum = SAEnum(TaskState, name="task_state", values_callable=lambda e: [m.value for m in e])
+_task_state_enum = SAEnum(
+    TaskState, name="task_state", values_callable=lambda e: [m.value for m in e]
+)
 _data_point_source_enum = SAEnum(
     DataPointSource, name="data_point_source", values_callable=lambda e: [m.value for m in e]
 )
@@ -97,10 +103,15 @@ class Booking(Base):
     check_in_date: Mapped[date] = mapped_column(Date, nullable=False)
     check_out_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[BookingStatus] = mapped_column(
-        _status_enum, nullable=False, default=BookingStatus.ACTIVE, server_default=BookingStatus.ACTIVE.value
+        _status_enum,
+        nullable=False,
+        default=BookingStatus.ACTIVE,
+        server_default=BookingStatus.ACTIVE.value,
     )
     source_email_message_id: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
-    cancellation_email_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True)
+    cancellation_email_message_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, unique=True
+    )
     signed_pdf_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -132,11 +143,16 @@ class BookingTask(Base):
     )
     task_type: Mapped[TaskType] = mapped_column(_task_type_enum, nullable=False)
     state: Mapped[TaskState] = mapped_column(
-        _task_state_enum, nullable=False, default=TaskState.PENDING, server_default=TaskState.PENDING.value
+        _task_state_enum,
+        nullable=False,
+        default=TaskState.PENDING,
+        server_default=TaskState.PENDING.value,
     )
     external_ref: Mapped[str | None] = mapped_column(String(256), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

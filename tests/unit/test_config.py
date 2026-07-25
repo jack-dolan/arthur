@@ -1,12 +1,13 @@
-import pytest
 from pathlib import Path
+
+import pytest
 from pydantic import ValidationError
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 
 def test_load_valid_config_returns_app_config():
-    from app.config import load_config, AppConfig
+    from app.config import AppConfig, load_config
     config = load_config(FIXTURES / "config.test.yaml")
     assert isinstance(config, AppConfig)
 
@@ -39,7 +40,7 @@ def test_email_addresses_loaded():
 
 
 def test_single_property_loaded():
-    from app.config import load_config, PropertyConfig
+    from app.config import PropertyConfig, load_config
     config = load_config(FIXTURES / "config.test.yaml")
     assert len(config.properties) == 1
     assert isinstance(config.properties[0], PropertyConfig)
@@ -47,7 +48,7 @@ def test_single_property_loaded():
 
 
 def test_hoa_enabled_config():
-    from app.config import load_config, HOAConfig
+    from app.config import HOAConfig, load_config
     config = load_config(FIXTURES / "config.test.yaml")
     hoa = config.properties[0].hoa
     assert isinstance(hoa, HOAConfig)
@@ -66,7 +67,9 @@ def test_hoa_disabled_requires_no_email():
         "properties": [{
             "id": "p1",
             "hoa": {"enabled": False},
-            "cleaner_schedule": {"type": "google_sheets", "spreadsheet_id": "sid1", "sheet_name": "Sheet"},
+            "cleaner_schedule": {
+                "type": "google_sheets", "spreadsheet_id": "sid1", "sheet_name": "Sheet"
+            },
             "seam_device_id": "dev1",
             "docusign_template_id": "tpl1",
         }],
@@ -85,14 +88,22 @@ def test_multiple_properties_supported():
             {
                 "id": "p1",
                 "hoa": {"enabled": False},
-                "cleaner_schedule": {"type": "google_sheets", "spreadsheet_id": "sid1", "sheet_name": "Sheet1"},
+                "cleaner_schedule": {
+                    "type": "google_sheets",
+                    "spreadsheet_id": "sid1",
+                    "sheet_name": "Sheet1",
+                },
                 "seam_device_id": "dev1",
                 "docusign_template_id": "tpl1",
             },
             {
                 "id": "p2",
                 "hoa": {"enabled": True, "email": "hoa@example.com"},
-                "cleaner_schedule": {"type": "google_sheets", "spreadsheet_id": "sid2", "sheet_name": "Sheet2"},
+                "cleaner_schedule": {
+                    "type": "google_sheets",
+                    "spreadsheet_id": "sid2",
+                    "sheet_name": "Sheet2",
+                },
                 "seam_device_id": "dev2",
                 "docusign_template_id": "tpl2",
             },

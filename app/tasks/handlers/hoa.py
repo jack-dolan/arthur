@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import load_config
 from app.db.models import Booking, BookingTask, TaskState
 from app.integrations.gmail.oauth import get_alerts_service
-from app.integrations.hoa.email import ET, send_hoa_email
+from app.integrations.hoa.email import send_hoa_email
 from app.integrations.hoa.window import hoa_window, today_et
 from app.tasks.claim import claim_task
 

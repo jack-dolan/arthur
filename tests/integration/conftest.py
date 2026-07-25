@@ -6,14 +6,10 @@ Tests that don't need the DB simply don't depend on the fixture.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from tests.conftest import TEST_DATABASE_URL
-
 
 # NOTE (2026-07-22): the fail-loud live-API guard that used to live here
 # (`_block_live_gmail`, added after the Step 14 leak) has been SUPERSEDED by

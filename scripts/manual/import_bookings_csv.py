@@ -102,7 +102,10 @@ async def _import(rows: list[Row], dry_run: bool) -> None:
                 )
             )).scalar_one_or_none()
             if exists is not None:
-                print(f"  SKIP  {r.platform.value:6s} {r.external_id:12s} {r.first} {r.last} — already in system")
+                print(
+                    f"  SKIP  {r.platform.value:6s} {r.external_id:12s} "
+                    f"{r.first} {r.last} — already in system"
+                )
                 skipped += 1
                 continue
             contact = []
@@ -110,8 +113,13 @@ async def _import(rows: list[Row], dry_run: bool) -> None:
                 contact.append("email")
             if r.phone:
                 contact.append("phone")
-            tag = ("[" + "+".join(contact) + " → ready to dispatch]") if contact else "[no contact → WAITING]"
-            print(f"  {'WOULD ADD' if dry_run else 'ADD  '}  {r.platform.value:6s} {r.external_id:12s} "
+            tag = (
+                ("[" + "+".join(contact) + " → ready to dispatch]")
+                if contact
+                else "[no contact → WAITING]"
+            )
+            print(f"  {'WOULD ADD' if dry_run else 'ADD  '}  "
+                  f"{r.platform.value:6s} {r.external_id:12s} "
                   f"{r.first} {r.last}  {r.check_in}→{r.check_out}  {tag}")
             if dry_run:
                 created += 1
@@ -124,7 +132,9 @@ async def _import(rows: list[Row], dry_run: bool) -> None:
                 status=BookingStatus.ACTIVE,
                 source_email_message_id=f"csv-import:{r.platform.value}:{r.external_id}",
             )
-            booking.tasks.extend(_initial_tasks(r.platform, has_phone=bool(r.phone), has_email=bool(r.email)))
+            booking.tasks.extend(
+                _initial_tasks(r.platform, has_phone=bool(r.phone), has_email=bool(r.email))
+            )
             s.add(booking)
             created += 1
         if not dry_run:

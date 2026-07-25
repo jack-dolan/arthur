@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 
 import pytest
+from fastapi.templating import Jinja2Templates
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -22,7 +23,6 @@ from starlette.requests import Request
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.testclient import TestClient
-from fastapi.templating import Jinja2Templates
 
 _LINK_RE = re.compile(r'<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"')
 

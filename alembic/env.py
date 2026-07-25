@@ -2,6 +2,7 @@ import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
+
 from alembic import context
 
 config = context.config
@@ -18,8 +19,8 @@ db_url = os.environ.get(
 config.set_main_option("sqlalchemy.url", db_url)
 
 # Import models so Alembic sees all tables when autogenerating migrations.
-from app.db.session import Base  # noqa: E402
 from app.db import models  # noqa: E402, F401
+from app.db.session import Base  # noqa: E402
 
 target_metadata = Base.metadata
 

@@ -136,7 +136,11 @@ def log_docusign_target() -> tuple[str, str]:
     Returns the (oauth_host, api_host) it reported, so callers/tests can assert.
     """
     oauth_host, api_host = _docusign_hosts()
-    environment = "SANDBOX (demo tier)" if settings.docusign_sandbox else "PRODUCTION (real envelopes, real money)"
+    environment = (
+        "SANDBOX (demo tier)"
+        if settings.docusign_sandbox
+        else "PRODUCTION (real envelopes, real money)"
+    )
     log.info(
         "DocuSign target: %s | oauth=%s | api=%s",
         environment,

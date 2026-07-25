@@ -65,7 +65,9 @@ def _require_env(name: str, purpose: str) -> str:
 
 async def _get():
     async with AsyncSessionLocal() as s:
-        b = (await s.execute(select(Booking).where(Booking.external_id == EXTID))).scalar_one_or_none()
+        b = (
+            await s.execute(select(Booking).where(Booking.external_id == EXTID))
+        ).scalar_one_or_none()
         if not b:
             return None
         await s.refresh(b, attribute_names=["tasks"])
@@ -159,7 +161,11 @@ async def teardown():
         return
     by = {t.task_type: t for t in b.tasks}
     env = by.get(TaskType.DOCUSIGN_SEND).external_ref if TaskType.DOCUSIGN_SEND in by else None
-    seam = by.get(TaskType.ACCESS_CODE_CREATE).external_ref if TaskType.ACCESS_CODE_CREATE in by else None
+    seam = (
+        by.get(TaskType.ACCESS_CODE_CREATE).external_ref
+        if TaskType.ACCESS_CODE_CREATE in by
+        else None
+    )
     bid, signed = b.id, b.signed_pdf_path
 
     if env:
@@ -179,14 +185,24 @@ async def teardown():
         prop = load_config().properties[0]
         sid, name = prop.cleaner_schedule.spreadsheet_id, prop.cleaner_schedule.sheet_name
         svc = get_sheets_service()
-        rows = svc.spreadsheets().values().get(spreadsheetId=sid, range=name).execute().get("values", [])
+        rows = (
+            svc.spreadsheets()
+            .values()
+            .get(spreadsheetId=sid, range=name)
+            .execute()
+            .get("values", [])
+        )
         hits = [i for i, r in enumerate(rows) if any(LAST in str(c) for c in r)]
         if hits:
             sheet_id = _find_sheet_id(svc.spreadsheets().get(spreadsheetId=sid).execute(), name)
             for i in sorted(hits, reverse=True):
-                svc.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": [
-                    {"deleteDimension": {"range": {"sheetId": sheet_id, "dimension": "ROWS",
-                                                   "startIndex": i, "endIndex": i + 1}}}]}).execute()
+                svc.spreadsheets().batchUpdate(
+                    spreadsheetId=sid,
+                    body={"requests": [{"deleteDimension": {"range": {
+                        "sheetId": sheet_id, "dimension": "ROWS",
+                        "startIndex": i, "endIndex": i + 1,
+                    }}}]},
+                ).execute()
             print(f"deleted {len(hits)} sheet row(s) matching {LAST!r}")
         else:
             print("no sheet rows matched")

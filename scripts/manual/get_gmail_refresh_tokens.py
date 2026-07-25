@@ -74,7 +74,10 @@ def main() -> None:
     from app.settings import settings
 
     if not settings.google_client_id or not settings.google_client_secret:
-        print("ERROR: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in .env", file=sys.stderr)
+        print(
+            "ERROR: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in .env",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     client_config = {
@@ -89,7 +92,7 @@ def main() -> None:
 
     print(f"\nAccount role : {args.account}")
     print(f"Env variable : {env_key}")
-    print(f"\nStarting OAuth flow on http://localhost:8765 ...")
+    print("\nStarting OAuth flow on http://localhost:8765 ...")
     print("Make sure you are forwarding this port via SSH:")
     print("    ssh -L 8765:localhost:8765 <your-vps>")
     print("\nWhen the URL is printed below, open it in your LOCAL browser.")

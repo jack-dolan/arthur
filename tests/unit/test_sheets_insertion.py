@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from datetime import date
 
-
 # ---------------------------------------------------------------------------
 # _find_insertion_index — pure logic, no I/O
 # ---------------------------------------------------------------------------
@@ -137,7 +136,7 @@ def test_find_insertion_index_handles_iso_dates_in_col_c():
 
 def test_get_sheets_service_uses_refresh_token_from_settings():
     """Service is built with settings.google_sheets_refresh_token as refresh_token."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     with (
         patch("app.integrations.sheets.client.build") as mock_build,
@@ -161,10 +160,9 @@ def test_get_sheets_service_uses_refresh_token_from_settings():
 # handle_cleaner_sheet — async handler tests (Task 2, Wave 2)
 # ---------------------------------------------------------------------------
 
-import uuid
 import asyncio
-from datetime import date
-from unittest.mock import AsyncMock, MagicMock, patch, call
+import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 def _make_booking(check_in=date(2026, 9, 1), check_out=date(2026, 9, 5), property_id="prop-1"):
@@ -215,11 +213,25 @@ def _make_mock_service(rows=None):
     return mock_service
 
 
-def _make_config(spreadsheet_id="test-spreadsheet-id", sheet_name="Cleaner Schedule", property_id="prop-1", sentinel_pattern=None):
+def _make_config(
+    spreadsheet_id="test-spreadsheet-id",
+    sheet_name="Cleaner Schedule",
+    property_id="prop-1",
+    sentinel_pattern=None,
+):
     """Build a minimal mock AppConfig with one property."""
-    from app.config import AppConfig, PropertyConfig, OwnersConfig, EmailConfig, HOAConfig, CleanerScheduleConfig
+    from app.config import (
+        AppConfig,
+        CleanerScheduleConfig,
+        EmailConfig,
+        HOAConfig,
+        OwnersConfig,
+        PropertyConfig,
+    )
 
-    schedule_kwargs = dict(type="google_sheets", spreadsheet_id=spreadsheet_id, sheet_name=sheet_name)
+    schedule_kwargs = dict(
+        type="google_sheets", spreadsheet_id=spreadsheet_id, sheet_name=sheet_name
+    )
     if sentinel_pattern is not None:
         schedule_kwargs["sentinel_pattern"] = sentinel_pattern
 
@@ -243,8 +255,8 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_handle_cleaner_sheet_inserts_row_at_correct_index():
-    """Handler calls batchUpdate with insertDimension at the index returned by _find_insertion_index."""
-    from app.db.models import BookingTask, TaskState
+    """Handler calls batchUpdate with insertDimension at the index returned by
+    _find_insertion_index."""
 
     booking = _make_booking()
     task = _make_task()
@@ -261,7 +273,7 @@ async def test_handle_cleaner_sheet_inserts_row_at_correct_index():
     with (
         patch("app.tasks.handlers.cleaner_sheet.get_sheets_service", return_value=mock_service),
         patch("app.tasks.handlers.cleaner_sheet.load_config", return_value=config),
-        patch("app.tasks.handlers.cleaner_sheet._find_insertion_index", return_value=2) as mock_find_idx,
+        patch("app.tasks.handlers.cleaner_sheet._find_insertion_index", return_value=2),
     ):
         from app.tasks.handlers.cleaner_sheet import handle_cleaner_sheet
         await handle_cleaner_sheet(booking, task, session)

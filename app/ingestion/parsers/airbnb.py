@@ -112,7 +112,7 @@ def parse_airbnb_booking(msg: Message) -> AirbnbBookingData:
 
     # --- body parsing ---
     body = _get_text_body(msg)
-    lines = [l.strip() for l in body.splitlines()]
+    lines = [ln.strip() for ln in body.splitlines()]
 
     # Find "Check-in      Checkout" section then parse the date line below it.
     check_in_date: date | None = None

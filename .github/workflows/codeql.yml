@@ -1,0 +1,46 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, Monday 07:23 UTC. Off the hour on purpose: scheduled workflows
+    # queue behind everyone else's :00 cron.
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: analyze (python)
+    runs-on: ubuntu-latest
+
+    # Static analysis of the application code, using CodeQL's default query
+    # suite for Python. Code scanning is free for public repositories; results
+    # land in this repository's Security tab. Nothing here needs credentials,
+    # a database, or the dependencies installed: build-mode "none" tells CodeQL
+    # to extract the source tree directly, which is the correct mode for
+    # Python.
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: python
+          build-mode: none
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:python

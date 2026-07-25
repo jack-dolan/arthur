@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 
 
 async def test_can_insert_and_fetch_booking(db_session):
-    from app.db.models import Booking, Platform, BookingStatus
+    from app.db.models import Booking, BookingStatus, Platform
 
     booking = Booking(
         platform=Platform.AIRBNB,
@@ -40,16 +40,22 @@ async def test_unique_platform_external_id(db_session):
         guest_first_name="A", guest_last_name="B",
         check_in_date=date(2026, 6, 1), check_out_date=date(2026, 6, 5),
     )
-    db_session.add(Booking(platform=Platform.AIRBNB, external_id="DUP", source_email_message_id="m1", **base))
+    db_session.add(
+        Booking(platform=Platform.AIRBNB, external_id="DUP", source_email_message_id="m1", **base)
+    )
     await db_session.commit()
 
-    db_session.add(Booking(platform=Platform.AIRBNB, external_id="DUP", source_email_message_id="m2", **base))
+    db_session.add(
+        Booking(platform=Platform.AIRBNB, external_id="DUP", source_email_message_id="m2", **base)
+    )
     with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()
 
     # Same external_id is fine across platforms.
-    db_session.add(Booking(platform=Platform.VRBO, external_id="DUP", source_email_message_id="m3", **base))
+    db_session.add(
+        Booking(platform=Platform.VRBO, external_id="DUP", source_email_message_id="m3", **base)
+    )
     await db_session.commit()
 
 
@@ -61,17 +67,25 @@ async def test_unique_source_email_message_id(db_session):
         guest_first_name="A", guest_last_name="B",
         check_in_date=date(2026, 6, 1), check_out_date=date(2026, 6, 5),
     )
-    db_session.add(Booking(platform=Platform.AIRBNB, external_id="E1", source_email_message_id="same", **base))
+    db_session.add(
+        Booking(
+            platform=Platform.AIRBNB, external_id="E1", source_email_message_id="same", **base
+        )
+    )
     await db_session.commit()
 
-    db_session.add(Booking(platform=Platform.AIRBNB, external_id="E2", source_email_message_id="same", **base))
+    db_session.add(
+        Booking(
+            platform=Platform.AIRBNB, external_id="E2", source_email_message_id="same", **base
+        )
+    )
     with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()
 
 
 async def test_booking_tasks_cascade_delete(db_session):
-    from app.db.models import Booking, BookingTask, Platform, TaskType, TaskState
+    from app.db.models import Booking, BookingTask, Platform, TaskState, TaskType
 
     booking = Booking(
         platform=Platform.VRBO, external_id="V1", property_id="property_1",
@@ -95,7 +109,7 @@ async def test_booking_tasks_cascade_delete(db_session):
 
 
 async def test_booking_task_unique_on_booking_and_task_type(db_session):
-    from app.db.models import Booking, BookingTask, Platform, TaskType, TaskState
+    from app.db.models import Booking, BookingTask, Platform, TaskState, TaskType
 
     booking = Booking(
         platform=Platform.AIRBNB, external_id="UQ1", property_id="property_1",
@@ -106,10 +120,14 @@ async def test_booking_task_unique_on_booking_and_task_type(db_session):
     db_session.add(booking)
     await db_session.commit()
 
-    db_session.add(BookingTask(booking_id=booking.id, task_type=TaskType.HOA_EMAIL, state=TaskState.PENDING))
+    db_session.add(
+        BookingTask(booking_id=booking.id, task_type=TaskType.HOA_EMAIL, state=TaskState.PENDING)
+    )
     await db_session.commit()
 
-    db_session.add(BookingTask(booking_id=booking.id, task_type=TaskType.HOA_EMAIL, state=TaskState.PENDING))
+    db_session.add(
+        BookingTask(booking_id=booking.id, task_type=TaskType.HOA_EMAIL, state=TaskState.PENDING)
+    )
     with pytest.raises(IntegrityError):
         await db_session.commit()
     await db_session.rollback()
@@ -126,7 +144,8 @@ async def test_data_points_record_provenance(db_session):
     )
     booking.data_points.extend([
         DataPoint(field_name="guest_first_name", value="Eve", source=DataPointSource.EMAIL_PARSE),
-        DataPoint(field_name="guest_phone", value="+15551234567", source=DataPointSource.MANUAL_ENTRY,
+        DataPoint(field_name="guest_phone", value="+15551234567",
+                  source=DataPointSource.MANUAL_ENTRY,
                   notes="entered by primary owner"),
     ])
     db_session.add(booking)

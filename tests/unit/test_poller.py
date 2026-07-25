@@ -202,9 +202,9 @@ async def test_process_vrbo_cancellation_calls_cancellation_handler():
 @pytest.mark.asyncio
 async def test_persist_booking_writes_booking_and_data_points():
     """persist_booking should add() a Booking with data_points attached."""
-    from app.ingestion.poller import persist_booking
     from app.db.models import Platform
     from app.ingestion.parsers.airbnb import AirbnbBookingData
+    from app.ingestion.poller import persist_booking
 
     parsed = AirbnbBookingData(
         confirmation_code="HMTEST01",

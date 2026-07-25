@@ -168,7 +168,8 @@ def main() -> None:
     print(f"\n=== Target: {env_name.upper()} (oauth host {oauth_host}) ===")
     print(
         f"\nStep 1 — make 127.0.0.1:{REDIRECT_PORT} reachable from your browser machine\n"
-        f"    (already done if you launched this via `ssh -L {REDIRECT_PORT}:localhost:{REDIRECT_PORT} <host> ...`)"
+        f"    (already done if you launched this via "
+        f"`ssh -L {REDIRECT_PORT}:localhost:{REDIRECT_PORT} <host> ...`)"
     )
     print(f"\nStep 2 — open this URL and sign in with your {env_name.upper()} DocuSign account:\n")
     print("    " + auth_url + "\n")
@@ -206,12 +207,18 @@ def main() -> None:
         return
 
     accounts = ui.get("accounts", [])
-    print(f"\nuserinfo OK — signed in as {ui.get('email','?')}; {len(accounts)} account(s) visible:")
+    print(
+        f"\nuserinfo OK — signed in as {ui.get('email','?')}; "
+        f"{len(accounts)} account(s) visible:"
+    )
     for a in accounts:
         base = a.get("base_uri", "")
         tag = "DEMO" if base.startswith("https://demo") else "PROD"
         default = " (default)" if a.get("is_default") else ""
-        print(f"    [{tag}] account_id={a.get('account_id')}  name={a.get('account_name')!r}{default}")
+        print(
+            f"    [{tag}] account_id={a.get('account_id')}  "
+            f"name={a.get('account_name')!r}{default}"
+        )
         print(f"          base_uri={base}")
     if env_name == "production":
         prod = [a for a in accounts if not a.get("base_uri", "").startswith("https://demo")]
@@ -221,7 +228,10 @@ def main() -> None:
                 "you want to send from (usually the default)."
             )
         else:
-            print("\nWARNING: no production account visible — did you sign in to the right account?")
+            print(
+                "\nWARNING: no production account visible — "
+                "did you sign in to the right account?"
+            )
     print("\nPASS: token exchange + access-token validation succeeded.")
 
 

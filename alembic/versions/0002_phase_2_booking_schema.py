@@ -7,9 +7,9 @@ Create Date: 2026-05-10 21:06:41.312081
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision: str = '0002'
 down_revision: Union[str, None] = '0001'
@@ -30,11 +30,14 @@ def upgrade() -> None:
     sa.Column('guest_email', sa.String(length=256), nullable=True),
     sa.Column('check_in_date', sa.Date(), nullable=False),
     sa.Column('check_out_date', sa.Date(), nullable=False),
-    sa.Column('status', sa.Enum('active', 'cancelled', name='booking_status'), server_default='active', nullable=False),
+    sa.Column('status', sa.Enum('active', 'cancelled', name='booking_status'),
+              server_default='active', nullable=False),
     sa.Column('source_email_message_id', sa.String(length=128), nullable=False),
     sa.Column('cancellation_email_message_id', sa.String(length=128), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True),
+              server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True),
+              server_default=sa.text('now()'), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('cancellation_email_message_id'),
     sa.UniqueConstraint('platform', 'external_id', name='uq_bookings_platform_external_id'),
@@ -45,13 +48,28 @@ def upgrade() -> None:
     op.create_table('booking_tasks',
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('booking_id', sa.UUID(), nullable=False),
-    sa.Column('task_type', sa.Enum('owner_alert_new_booking', 'docusign_send', 'docusign_void', 'cleaner_sheet_add', 'access_code_create', 'access_code_delete', 'hoa_email', 'owner_alert_missing_phone_7d', 'owner_alert_missing_phone_4d', 'owner_alert_missing_email_7d', 'owner_alert_missing_email_4d', 'owner_alert_docusign_unsigned_7d', 'owner_alert_docusign_unsigned_4d', 'owner_alert_cancellation_hoa', 'owner_alert_cancellation_cleaner', name='task_type'), nullable=False),
-    sa.Column('state', sa.Enum('pending', 'waiting', 'in_progress', 'complete', 'failed', 'skipped', name='task_state'), server_default='pending', nullable=False),
+    sa.Column('task_type', sa.Enum('owner_alert_new_booking', 'docusign_send',
+                                   'docusign_void', 'cleaner_sheet_add',
+                                   'access_code_create', 'access_code_delete',
+                                   'hoa_email', 'owner_alert_missing_phone_7d',
+                                   'owner_alert_missing_phone_4d',
+                                   'owner_alert_missing_email_7d',
+                                   'owner_alert_missing_email_4d',
+                                   'owner_alert_docusign_unsigned_7d',
+                                   'owner_alert_docusign_unsigned_4d',
+                                   'owner_alert_cancellation_hoa',
+                                   'owner_alert_cancellation_cleaner',
+                                   name='task_type'), nullable=False),
+    sa.Column('state', sa.Enum('pending', 'waiting', 'in_progress', 'complete',
+                               'failed', 'skipped', name='task_state'),
+              server_default='pending', nullable=False),
     sa.Column('external_ref', sa.String(length=256), nullable=True),
     sa.Column('last_error', sa.Text(), nullable=True),
     sa.Column('attempt_count', sa.Integer(), server_default='0', nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True),
+              server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True),
+              server_default=sa.text('now()'), nullable=False),
     sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
     sa.ForeignKeyConstraint(['booking_id'], ['bookings.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
@@ -63,13 +81,17 @@ def upgrade() -> None:
     sa.Column('booking_id', sa.UUID(), nullable=False),
     sa.Column('field_name', sa.String(length=64), nullable=False),
     sa.Column('value', sa.Text(), nullable=False),
-    sa.Column('source', sa.Enum('email_parse', 'manual_entry', 'web_scrape', 'docusign_webhook', 'system_default', name='data_point_source'), nullable=False),
-    sa.Column('recorded_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('source', sa.Enum('email_parse', 'manual_entry', 'web_scrape',
+                                'docusign_webhook', 'system_default',
+                                name='data_point_source'), nullable=False),
+    sa.Column('recorded_at', sa.DateTime(timezone=True),
+              server_default=sa.text('now()'), nullable=False),
     sa.Column('notes', sa.Text(), nullable=True),
     sa.ForeignKeyConstraint(['booking_id'], ['bookings.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index('ix_data_points_booking_field', 'data_points', ['booking_id', 'field_name'], unique=False)
+    op.create_index('ix_data_points_booking_field', 'data_points',
+                    ['booking_id', 'field_name'], unique=False)
     # ### end Alembic commands ###
 
 

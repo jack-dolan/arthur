@@ -14,12 +14,12 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
-from app.main import app
 from app.config import load_config
-from app.db.session import get_db
 from app.db.models import Booking, BookingStatus, Platform
+from app.db.session import get_db
+from app.main import app
 from app.routers.auth import require_user
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -365,7 +365,8 @@ async def test_detail_renders_without_pipeline_when_config_missing():
 async def test_detail_shows_actual_seam_code_on_complete_access_task():
     """The access-code row renders "complete: <code>" using the value recorded
     from the Seam API response — never derived from the phone number."""
-    from datetime import datetime, timezone as tz
+    from datetime import datetime
+    from datetime import timezone as tz
     from unittest.mock import patch
 
     from app.db.models import DataPoint, DataPointSource

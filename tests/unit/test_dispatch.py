@@ -87,7 +87,9 @@ async def test_dispatch_iterates_pending_tasks_sequentially():
 
     booking = _make_booking_with_tasks()
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=booking)))
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=booking))
+    )
     session.refresh = AsyncMock()
     session.commit = AsyncMock()
 
@@ -126,7 +128,9 @@ async def test_dispatch_handler_failure_isolates_other_tasks():
 
     booking = _make_booking_with_tasks()
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=booking)))
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=booking))
+    )
     session.refresh = AsyncMock()
     session.commit = AsyncMock()
 
@@ -169,7 +173,9 @@ async def test_dispatch_commits_after_each_task():
 
     booking = _make_booking_with_tasks()
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=booking)))
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=booking))
+    )
     session.refresh = AsyncMock()
     session.commit = AsyncMock()
 
@@ -201,7 +207,9 @@ async def test_dispatch_seam_missing_phone_sets_waiting_not_failed():
 
     booking = _make_booking_with_tasks(guest_phone=None)
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=booking)))
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=booking))
+    )
     session.refresh = AsyncMock()
     session.commit = AsyncMock()
 
@@ -231,7 +239,8 @@ async def test_dispatch_seam_missing_phone_sets_waiting_not_failed():
 
 @pytest.mark.asyncio
 async def test_dispatch_skips_tasks_not_in_phase_4_handler_map():
-    """Tasks with no Phase 4 handler (e.g., OWNER_ALERT_NEW_BOOKING PENDING) are skipped silently."""
+    """Tasks with no Phase 4 handler (e.g., OWNER_ALERT_NEW_BOOKING PENDING) are
+    skipped silently."""
     from app.tasks.dispatch import _dispatch_pending_tasks
 
     booking = _make_booking_with_tasks(task_overrides={
@@ -241,7 +250,9 @@ async def test_dispatch_skips_tasks_not_in_phase_4_handler_map():
         TaskType.ACCESS_CODE_CREATE: (TaskState.WAITING, None),
     })
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=booking)))
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=booking))
+    )
     session.refresh = AsyncMock()
     session.commit = AsyncMock()
 
@@ -278,7 +289,9 @@ async def test_dispatch_booking_not_found_logs_warning_and_returns():
     from app.tasks.dispatch import _dispatch_pending_tasks
 
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    )
     session.refresh = AsyncMock()
     session.commit = AsyncMock()
 

@@ -22,9 +22,8 @@ import asyncio
 import base64
 import uuid
 from datetime import date, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
@@ -37,7 +36,8 @@ from app.db.models import (
     TaskState,
     TaskType,
 )
-from app.db.session import AsyncSessionLocal, engine as app_engine
+from app.db.session import AsyncSessionLocal
+from app.db.session import engine as app_engine
 
 TODAY = date.today()
 from tests.conftest import recorded_email_bytes
@@ -123,7 +123,9 @@ async def test_concurrent_dispatch_runs_each_handler_exactly_once(db_session):
     booking = _booking()
     booking.tasks.append(BookingTask(task_type=TaskType.CLEANER_SHEET_ADD, state=TaskState.PENDING))
     booking.tasks.append(BookingTask(task_type=TaskType.DOCUSIGN_SEND, state=TaskState.PENDING))
-    booking.tasks.append(BookingTask(task_type=TaskType.ACCESS_CODE_CREATE, state=TaskState.PENDING))
+    booking.tasks.append(
+        BookingTask(task_type=TaskType.ACCESS_CODE_CREATE, state=TaskState.PENDING)
+    )
     booking_id = await _seed(booking)
 
     calls = {"cleaner": 0, "docusign": 0, "seam": 0}
@@ -160,7 +162,9 @@ async def test_concurrent_dispatch_runs_each_handler_exactly_once(db_session):
         )
 
     assert calls["cleaner"] == 1, f"CLEANER_SHEET_ADD ran {calls['cleaner']}x (want 1)"
-    assert calls["docusign"] == 1, f"DOCUSIGN_SEND ran {calls['docusign']}x (want 1) — duplicate envelope!"
+    assert calls["docusign"] == 1, (
+        f"DOCUSIGN_SEND ran {calls['docusign']}x (want 1) — duplicate envelope!"
+    )
     assert calls["seam"] == 1, f"ACCESS_CODE_CREATE ran {calls['seam']}x (want 1) — duplicate code!"
 
     tasks = await _reload_tasks(booking_id)
@@ -248,7 +252,9 @@ async def test_dispatch_isolates_one_failing_task(db_session):
     booking = _booking()
     booking.tasks.append(BookingTask(task_type=TaskType.CLEANER_SHEET_ADD, state=TaskState.PENDING))
     booking.tasks.append(BookingTask(task_type=TaskType.DOCUSIGN_SEND, state=TaskState.PENDING))
-    booking.tasks.append(BookingTask(task_type=TaskType.ACCESS_CODE_CREATE, state=TaskState.PENDING))
+    booking.tasks.append(
+        BookingTask(task_type=TaskType.ACCESS_CODE_CREATE, state=TaskState.PENDING)
+    )
     booking_id = await _seed(booking)
 
     async def ok(bk, task, session):
@@ -287,7 +293,9 @@ async def test_dispatch_survives_handler_that_aborts_the_transaction(db_session)
     booking = _booking()
     booking.tasks.append(BookingTask(task_type=TaskType.CLEANER_SHEET_ADD, state=TaskState.PENDING))
     booking.tasks.append(BookingTask(task_type=TaskType.DOCUSIGN_SEND, state=TaskState.PENDING))
-    booking.tasks.append(BookingTask(task_type=TaskType.ACCESS_CODE_CREATE, state=TaskState.PENDING))
+    booking.tasks.append(
+        BookingTask(task_type=TaskType.ACCESS_CODE_CREATE, state=TaskState.PENDING)
+    )
     booking_id = await _seed(booking)
 
     async def ok(bk, task, session):

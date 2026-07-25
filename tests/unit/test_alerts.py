@@ -13,8 +13,6 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-import pytest
-
 
 def _make_booking(platform_value="airbnb", guest_phone=None, guest_email=None):
     from app.db.models import Booking, BookingStatus, Platform
@@ -102,6 +100,7 @@ def test_alert_body_does_not_flag_email_when_present():
 
 def test_send_new_booking_alert_calls_gmail_send():
     from unittest.mock import MagicMock, patch
+
     from app.ingestion.alerts import send_new_booking_alert
 
     booking = _make_booking()
@@ -116,9 +115,10 @@ def test_send_new_booking_alert_calls_gmail_send():
 
 def test_send_encodes_message_as_base64():
     """The message passed to Gmail send must have a 'raw' key with base64 content."""
-    from unittest.mock import MagicMock, call, patch
-    from app.ingestion.alerts import send_new_booking_alert
     import base64
+    from unittest.mock import MagicMock
+
+    from app.ingestion.alerts import send_new_booking_alert
 
     booking = _make_booking()
     service = MagicMock()
@@ -191,7 +191,8 @@ def test_reminder_alert_phone_4d_subject_urgent():
 
 
 def test_reminder_alert_email_7d_vrbo_routing():
-    """OWNER_ALERT_MISSING_EMAIL_7D on VRBO: subject 'Action needed'; body has VRBO routing (D-09)."""
+    """OWNER_ALERT_MISSING_EMAIL_7D on VRBO: subject 'Action needed'; body has
+    VRBO routing (D-09)."""
     from app.db.models import TaskType
     from app.ingestion.alerts import build_reminder_alert
     booking = _make_booking(platform_value="vrbo", guest_email=None)
@@ -321,10 +322,11 @@ def test_reminder_alert_all_types_have_dashboard_deep_link_in_body():
 
 def test_send_reminder_alert_calls_gmail_send():
     """send_reminder_alert sends base64-encoded MIMEText through the alerts Gmail service."""
+    import base64
     from unittest.mock import MagicMock, patch
+
     from app.db.models import TaskType
     from app.ingestion.alerts import send_reminder_alert
-    import base64
 
     booking = _make_booking(platform_value="airbnb", guest_email="guest@example.com")
     service = MagicMock()

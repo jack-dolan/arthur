@@ -52,7 +52,9 @@ def get_sheets_service():
     creds = Credentials(
         token=None,
         refresh_token=settings.google_sheets_refresh_token,
-        token_uri="https://oauth2.googleapis.com/token",
+        # S106 is a false positive: this is Google's public, documented token
+        # endpoint, not a credential. The actual secrets are the two settings below.
+        token_uri="https://oauth2.googleapis.com/token",  # noqa: S106
         client_id=settings.google_client_id,
         client_secret=settings.google_client_secret,
         scopes=SCOPES,

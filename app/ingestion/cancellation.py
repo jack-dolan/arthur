@@ -29,6 +29,8 @@ from email.mime.text import MIMEText
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.integrations.seam.client as _seam_client_module
+import app.tasks.handlers.docusign as _docusign_handlers
 from app.config import load_config
 from app.db.models import (
     Booking,
@@ -42,8 +44,6 @@ from app.db.session import AsyncSessionLocal
 from app.ingestion.alerts import build_cancellation_alert
 from app.integrations.gmail.oauth import get_alerts_service
 from app.settings import settings
-import app.integrations.seam.client as _seam_client_module
-import app.tasks.handlers.docusign as _docusign_handlers
 
 log = logging.getLogger(__name__)
 

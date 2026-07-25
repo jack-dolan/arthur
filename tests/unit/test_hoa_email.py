@@ -154,7 +154,6 @@ def test_time_of_day_greeting_evening_at_2359():
 
 def test_send_hoa_email_attaches_pdf_from_signed_pdf_path():
     """PDF bytes read from signed_pdf_path are attached as MIMEApplication with subtype pdf."""
-    from email.mime.application import MIMEApplication
     from app.integrations.hoa.email import send_hoa_email
 
     booking = _make_booking()
@@ -190,6 +189,7 @@ def test_send_hoa_email_to_property_hoa_email():
     """The 'To' header of the sent email equals property_config.hoa.email."""
     import base64
     from email import message_from_bytes
+
     from app.integrations.hoa.email import send_hoa_email
 
     booking = _make_booking()
@@ -220,6 +220,7 @@ def test_send_hoa_email_subject_is_registration_form_with_date():
     """Subject is 'Guest Registration Form - Arriving M/D/YY' (check-in date); no guest name."""
     import base64
     from email import message_from_bytes
+
     from app.integrations.hoa.email import send_hoa_email
 
     booking = _make_booking()  # check_in_date = 2026-08-01
@@ -254,6 +255,7 @@ def test_send_hoa_email_body_greeting_signoff_and_from_display_name():
     a personal display name (deliverability)."""
     import base64
     from email import message_from_bytes
+
     from app.integrations.hoa.email import send_hoa_email
 
     booking = _make_booking()  # check_in_date = 2026-08-01
@@ -308,8 +310,14 @@ async def test_handle_hoa_email_sends_when_today_in_window():
     session = AsyncMock()
 
     # Make hoa_window return a range that includes today
-    window_earliest = date(today.year, today.month, today.day) - __import__("datetime").timedelta(days=2)
-    window_latest = date(today.year, today.month, today.day) + __import__("datetime").timedelta(days=5)
+    window_earliest = (
+        date(today.year, today.month, today.day)
+        - __import__("datetime").timedelta(days=2)
+    )
+    window_latest = (
+        date(today.year, today.month, today.day)
+        + __import__("datetime").timedelta(days=5)
+    )
 
     with patch("app.tasks.handlers.hoa.hoa_window", return_value=(window_earliest, window_latest)):
         with patch("app.tasks.handlers.hoa.send_hoa_email") as mock_send:
@@ -329,7 +337,8 @@ async def test_handle_hoa_email_sends_when_today_in_window():
 
 @pytest.mark.asyncio
 async def test_handle_hoa_email_skips_when_too_early():
-    """When today is before the window opens, send_hoa_email is NOT called; task stays WAITING (not FAILED)."""
+    """When today is before the window opens, send_hoa_email is NOT called;
+    task stays WAITING (not FAILED)."""
     from app.tasks.handlers.hoa import handle_hoa_email
 
     today = date.today()
@@ -340,8 +349,14 @@ async def test_handle_hoa_email_skips_when_too_early():
     session = AsyncMock()
 
     # Window starts 3 days in the future
-    window_earliest = date(today.year, today.month, today.day) + __import__("datetime").timedelta(days=3)
-    window_latest = date(today.year, today.month, today.day) + __import__("datetime").timedelta(days=10)
+    window_earliest = (
+        date(today.year, today.month, today.day)
+        + __import__("datetime").timedelta(days=3)
+    )
+    window_latest = (
+        date(today.year, today.month, today.day)
+        + __import__("datetime").timedelta(days=10)
+    )
 
     with patch("app.tasks.handlers.hoa.hoa_window", return_value=(window_earliest, window_latest)):
         with patch("app.tasks.handlers.hoa.send_hoa_email") as mock_send:
@@ -374,8 +389,14 @@ async def test_handle_hoa_email_sends_late_when_past_latest():
     session = AsyncMock()
 
     # Window entirely in the past
-    window_earliest = date(today.year, today.month, today.day) - __import__("datetime").timedelta(days=10)
-    window_latest = date(today.year, today.month, today.day) - __import__("datetime").timedelta(days=1)
+    window_earliest = (
+        date(today.year, today.month, today.day)
+        - __import__("datetime").timedelta(days=10)
+    )
+    window_latest = (
+        date(today.year, today.month, today.day)
+        - __import__("datetime").timedelta(days=1)
+    )
 
     with patch("app.tasks.handlers.hoa.hoa_window", return_value=(window_earliest, window_latest)):
         with patch("app.tasks.handlers.hoa.send_hoa_email") as mock_send:

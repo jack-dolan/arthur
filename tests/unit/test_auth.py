@@ -13,8 +13,8 @@ import pytest
 from starlette.exceptions import HTTPException
 from starlette.responses import PlainTextResponse
 
-from app.config import AppConfig, DashboardConfig, load_config
 import app.routers.auth as auth
+from app.config import AppConfig, DashboardConfig, load_config
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 

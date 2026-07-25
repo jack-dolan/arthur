@@ -89,6 +89,7 @@ from app.tasks.handlers.docusign import (  # noqa: E402
     void_envelope_idempotent,
 )
 
+
 def _require_env(name: str, purpose: str) -> str:
     """Read a required address from the environment. No default: these modes
     send real email, so an unset variable must stop the run rather than silently
@@ -201,7 +202,9 @@ async def ensure_schema() -> None:
 async def _booking_refs(external_id: str):
     """Return (booking_id, envelope_id, seam_code_id) for a persisted booking."""
     async with AsyncSessionLocal() as s:
-        b = (await s.execute(select(Booking).where(Booking.external_id == external_id))).scalar_one_or_none()
+        b = (
+            await s.execute(select(Booking).where(Booking.external_id == external_id))
+        ).scalar_one_or_none()
         if b is None:
             return None
         await s.refresh(b, attribute_names=["tasks"])
@@ -275,15 +278,25 @@ async def _teardown(sc, booking_id, envelope_id, seam_code_id) -> None:
         sid = prop.cleaner_schedule.spreadsheet_id
         name = prop.cleaner_schedule.sheet_name
         svc = get_sheets_service()
-        rows = svc.spreadsheets().values().get(spreadsheetId=sid, range=name).execute().get("values", [])
+        rows = (
+            svc.spreadsheets()
+            .values()
+            .get(spreadsheetId=sid, range=name)
+            .execute()
+            .get("values", [])
+        )
         marker = sc["last"]
         hits = [i for i, r in enumerate(rows) if any(marker in str(c) for c in r)]
         if hits:
             sheet_id = _find_sheet_id(svc.spreadsheets().get(spreadsheetId=sid).execute(), name)
             for i in sorted(hits, reverse=True):
-                svc.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": [
-                    {"deleteDimension": {"range": {"sheetId": sheet_id, "dimension": "ROWS",
-                                                   "startIndex": i, "endIndex": i + 1}}}]}).execute()
+                svc.spreadsheets().batchUpdate(
+                    spreadsheetId=sid,
+                    body={"requests": [{"deleteDimension": {"range": {
+                        "sheetId": sheet_id, "dimension": "ROWS",
+                        "startIndex": i, "endIndex": i + 1,
+                    }}}]},
+                ).execute()
             print(f"  deleted {len(hits)} sheet row(s) matching {marker!r}")
     except Exception as exc:
         print(f"  sheet cleanup failed: {exc}")
@@ -332,11 +345,17 @@ async def run_far_future() -> None:
 async def run_in_window_send() -> None:
     sc = _resolved("in_window")
     print("\n================ SCENARIO: in_window_send (leaves everything LIVE) ================")
-    print(f"  check-in {sc['check_in']}  ->  after signing, expect HOA_EMAIL = {sc['expect_hoa'].value}")
+    print(
+        f"  check-in {sc['check_in']}  ->  "
+        f"after signing, expect HOA_EMAIL = {sc['expect_hoa'].value}"
+    )
     await ensure_schema()
     # If a stale in_window booking exists, refuse (avoid UNIQUE collision / confusion).
     if await _booking_refs(sc["external_id"]) is not None:
-        print(f"\nA booking {sc['external_id']} already exists. Run in_window_complete (or clean up) first.")
+        print(
+            f"\nA booking {sc['external_id']} already exists. "
+            "Run in_window_complete (or clean up) first."
+        )
         await engine.dispose()
         return
     await _persist_contact_dispatch(sc)
@@ -392,7 +411,8 @@ async def run_in_window_complete() -> None:
             by = {t.task_type: t for t in b.tasks}
         ok = by[TaskType.HOA_EMAIL].state == sc["expect_hoa"] and b.signed_pdf_path
         print(f"\n[RESULT] HOA_EMAIL={by[TaskType.HOA_EMAIL].state.value}  "
-              f"expected={sc['expect_hoa'].value}  signed_pdf={'YES' if b.signed_pdf_path else 'no'}  "
+              f"expected={sc['expect_hoa'].value}  "
+              f"signed_pdf={'YES' if b.signed_pdf_path else 'no'}  "
               f"{'PASS' if ok else 'FAIL'}")
     finally:
         await _teardown(sc, booking_id, envelope_id, seam_code_id)
@@ -416,9 +436,15 @@ async def run_in_window_hoa() -> None:
     """
     sc = _resolved("in_window")
     ref_env = os.environ.get("REFERENCE_ENVELOPE_ID", "").strip()
-    print("\n============ SCENARIO: in_window_hoa (live HOA proof via reference signature) ============")
+    print(
+        "\n============ SCENARIO: in_window_hoa "
+        "(live HOA proof via reference signature) ============"
+    )
     if not ref_env:
-        print("Set REFERENCE_ENVELOPE_ID to a COMPLETED sandbox envelope id (a real prior signature).")
+        print(
+            "Set REFERENCE_ENVELOPE_ID to a COMPLETED sandbox envelope id "
+            "(a real prior signature)."
+        )
         await engine.dispose()
         return
     await ensure_schema()
@@ -452,7 +478,8 @@ async def run_in_window_hoa() -> None:
             by = {t.task_type: t for t in b.tasks}
         ok = by[TaskType.HOA_EMAIL].state == sc["expect_hoa"] and b.signed_pdf_path
         print(f"\n[RESULT] HOA_EMAIL={by[TaskType.HOA_EMAIL].state.value}  "
-              f"expected={sc['expect_hoa'].value}  signed_pdf={'YES' if b.signed_pdf_path else 'no'}  "
+              f"expected={sc['expect_hoa'].value}  "
+              f"signed_pdf={'YES' if b.signed_pdf_path else 'no'}  "
               f"{'PASS' if ok else 'FAIL'}")
         print(f"[RESULT] CLEANER_SHEET_ADD={by[TaskType.CLEANER_SHEET_ADD].state.value}  "
               f"DOCUSIGN_SEND={by[TaskType.DOCUSIGN_SEND].state.value}  "

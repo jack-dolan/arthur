@@ -27,7 +27,6 @@ from email import policy
 from unittest.mock import patch
 
 import pytest  # noqa: F401 — imported for acceptance criteria grep; RED gate removed in GREEN
-
 from sqlalchemy import delete, select
 
 from app.db.models import Booking, Platform, TaskState, TaskType
@@ -64,7 +63,8 @@ async def test_full_booking_dry_run():
     seam_code_id = None
     sheets_row_index = None
 
-    msg_id = f"e2e-test-{uuid.uuid4()}"  # unique per run — avoids UNIQUE constraint collision (T-06-11)
+    # unique per run — avoids UNIQUE constraint collision (T-06-11)
+    msg_id = f"e2e-test-{uuid.uuid4()}"
 
     parsed = AirbnbBookingData(
         confirmation_code="HMTEST9999",
