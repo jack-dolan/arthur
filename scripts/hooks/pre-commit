@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""Pre-commit privacy guard — keeps guest PII out of git history.
+
+Git history is forever, and this repo may one day be shared (a contractor, a
+support ticket, another migration). So guest personal data must never be
+committed in the first place: not in code, not in fixtures, and not in the
+prose an agent writes while narrating its work, which is how it leaked before.
+
+Three checks, all scoped to what this commit actually introduces:
+
+  PATH   a staged path that is private by design (see PRIVATE_PREFIXES) is
+         refused outright, even with `git add --force`.
+  NAME   a staged ADDED LINE containing a literal from the local tier-1 name
+         denylist. The file is gitignored and absent on a fresh clone; when it
+         is missing this check prints a notice and stands down, it does not
+         block.
+  PHONE  a staged ADDED LINE containing a real-looking phone number. The 555
+         placeholder space is exempt, as are repeated-digit runs.
+
+**Added lines only.** Unchanged context is never scanned, so historical
+material already in history (the Session Log) does not re-flag on every
+commit, and deleting such a line is a cleanup rather than a violation.
+
+Install with `scripts/install_hooks.sh` (git hooks are not cloned). A blocked
+commit can be made deliberately with `git commit --no-verify`.
+"""
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+DENYLIST_REL = ".secrets/denylist-guest.txt"
+
+# Paths that hold real guest material and are gitignored for that reason.
+# Staging one of these is always a mistake, whatever the file contains.
+PRIVATE_PREFIXES = (
+    ".secrets/",
+    "example-emails/",
+    "tests/fixtures/emails/",
+)
+
+# NANP-shaped numbers. Kept deliberately in step with the publish-time sweep:
+# if one changes, change the other, or the two will disagree about a tree.
+PHONE_RE = re.compile(
+    r"(?<![\w+.-])(?:\+?1[ .\-]?)?\(?[2-9]\d{2}\)?[ .\-]?\d{3}[ .\-]?\d{4}(?![\w.-])"
+)
+
+MAX_ECHO = 200  # never spill a whole minified line into the terminal
+
+
+def run(*args: str) -> str:
+    proc = subprocess.run(
+        ["git", *args], capture_output=True, text=True, errors="replace"
+    )
+    if proc.returncode != 0:
+        sys.stderr.write(f"pre-commit: `git {' '.join(args)}` failed:\n{proc.stderr}")
+        raise SystemExit(1)
+    return proc.stdout
+
+
+def is_placeholder_phone(match: str) -> bool:
+    digits = re.sub(r"\D", "", match)
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) != 10:
+        return True
+    if digits[:3] == "555" or digits[3:6] == "555":  # NANP placeholder space
+        return True
+    if len(set(digits)) == 1:  # 0000000000, 1111111111
+        return True
+    return False
+
+
+def load_denylist(root: Path) -> list[str] | None:
+    """Tier-1 terms, lowercased. ``None`` when the file is absent."""
+    path = root / DENYLIST_REL
+    if not path.is_file():
+        return None
+    terms = []
+    for raw in path.read_text(errors="replace").splitlines():
+        term = raw.strip()
+        if not term or term.startswith("#"):
+            continue
+        terms.append(term.lower())
+    return terms
+
+
+def staged_paths() -> list[str]:
+    out = run("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z")
+    return [p for p in out.split("\0") if p]
+
+
+def added_lines(path: str):
+    """Yield ``(lineno, text)`` for each line this commit adds to ``path``."""
+    diff = run(
+        "diff", "--cached", "-U0", "--no-color", "--no-ext-diff", "--", path
+    )
+    lineno = 0
+    for line in diff.splitlines():
+        hunk = re.match(r"^@@ -\S+ \+(\d+)(?:,\d+)? @@", line)
+        if hunk:
+            lineno = int(hunk.group(1))
+            continue
+        if line.startswith("+++"):
+            continue
+        if line.startswith("+"):
+            yield lineno, line[1:]
+            lineno += 1
+
+
+def echo(text: str) -> str:
+    text = text.strip()
+    return text if len(text) <= MAX_ECHO else text[:MAX_ECHO] + " …"
+
+
+def main() -> int:
+    root = Path(run("rev-parse", "--show-toplevel").strip())
+    paths = staged_paths()
+    if not paths:
+        return 0
+
+    terms = load_denylist(root)
+    findings: list[tuple[str, str, str, str]] = []  # kind, where, detail, line
+
+    for path in paths:
+        if path.startswith(PRIVATE_PREFIXES):
+            findings.append(
+                ("PATH", path, "private by design; this path is never committed", "")
+            )
+            continue
+        for lineno, text in added_lines(path):
+            lowered = text.lower()
+            for term in terms or ():
+                if term in lowered:
+                    findings.append(
+                        ("NAME", f"{path}:{lineno}", f"denylist term {term!r}", text)
+                    )
+                    break
+            for m in PHONE_RE.finditer(text):
+                if not is_placeholder_phone(m.group()):
+                    findings.append(
+                        ("PHONE", f"{path}:{lineno}", m.group(), text)
+                    )
+
+    if terms is None:
+        sys.stderr.write(
+            f"\n⚠  pre-commit privacy guard: no name denylist at {DENYLIST_REL}\n"
+            "   Literal name / code matching is DISABLED for this commit; the\n"
+            "   pattern checks below still ran.\n"
+            "   That file is gitignored by design, so a fresh clone never carries\n"
+            "   it. To turn the check back on, write it with\n"
+            "   one literal term per line (blank lines and #-comments ignored):\n"
+            "   the names, phone numbers and confirmation codes this repo must\n"
+            "   never record.\n"
+            '   See CLAUDE.md, "Privacy rules".\n'
+        )
+
+    if not findings:
+        return 0
+
+    sys.stderr.write(
+        f"\n✖  pre-commit privacy guard: {len(findings)} blocking issue(s) "
+        "in the staged changes.\n\n"
+    )
+    for kind, where, detail, line in findings:
+        sys.stderr.write(f"  {kind:<5} {where}\n        {detail}\n")
+        if line:
+            sys.stderr.write(f"        + {echo(line)}\n")
+        sys.stderr.write("\n")
+    sys.stderr.write(
+        "Guest PII never enters git history — history is forever. See CLAUDE.md,\n"
+        '"Privacy rules", for the conventions that keep it out.\n\n'
+        "If this is a deliberate, reviewed exception:\n"
+        "    git commit --no-verify\n\n"
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -312,7 +312,9 @@ async def test_detail_renders_hoa_pipeline_and_labels():
     # hoa_window itself (the math is pinned in tests/unit/test_hoa_window.py).
     from app.integrations.hoa.window import hoa_window
 
-    earliest, latest = hoa_window(booking.check_in_date, [1, 2, 3, 4, 5, 6], 2, 7)
+    # open_days must match _detail_pipeline_config's stub, or this assertion
+    # becomes weekday-dependent (see tests/unit/test_dashboard.py).
+    earliest, latest = hoa_window(booking.check_in_date, [1, 2, 3, 4, 5, 6, 7], 2, 7)
     assert "HOA Registration" in html
     assert str(earliest) in html
     assert str(latest) in html

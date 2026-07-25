@@ -825,8 +825,11 @@ def test_hoa_pipeline_before_window():
     # the window math itself is pinned in tests/unit/test_hoa_window.py.
     from app.integrations.hoa.window import hoa_window
 
+    # open_days must match _pipeline_config's stub, or this assertion becomes
+    # weekday-dependent: the two disagree only when a closed Sunday falls in
+    # the lead-time window, so it would pass on most days and fail on some.
     expected_earliest, expected_latest = hoa_window(
-        booking.check_in_date, [1, 2, 3, 4, 5, 6], 2, 7
+        booking.check_in_date, [1, 2, 3, 4, 5, 6, 7], 2, 7
     )
     assert p["earliest"] == expected_earliest
     assert p["latest"] == expected_latest

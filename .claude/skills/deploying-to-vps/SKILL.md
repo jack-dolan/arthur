@@ -121,7 +121,7 @@ ssh "$VPS" "cd $DIR && git reset --hard <last-good-sha> && docker compose up -d 
 ```
 
 If Step 3 took a backup and the migration is suspect, restore it with
-`scripts/restore.sh` (see README "Backup/restore") **before** rolling the
+`scripts/restore.sh` (see `docs/operations.md` "Restore") **before** rolling the
 code back past the migration. Re-run all of Step 5 after any rollback.
 
 ## Step 6 — Closeout

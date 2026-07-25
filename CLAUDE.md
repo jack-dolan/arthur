@@ -31,6 +31,36 @@ Sensitive values (names, addresses, HOA email, sheet name, API keys) live in `co
   `.claude/` material — skills, commands, `settings.json` — IS committed
 - All secrets go in `.env` (also gitignored)
 
+### Privacy rules
+
+Guest personal data — names, phone numbers, email addresses, booking
+confirmation codes, street addresses — **never goes into a committed file**.
+Git history is permanent: a value committed once is committed forever, and it
+outlives whatever made it seem harmless at the time. The leak path that
+matters here is not the code, it is prose — session notes and runbook entries
+written while narrating real work.
+
+- **Docs and Session Log entries** name a booking by its external-id *shape*
+  (`HMXXXXXXXXX`, `HA-XXXXXX`) or just call it "the guest". Never by name.
+- **Tests and fixtures** use placeholder values (`*@example.com`, `+1 (555)
+  01x-xxxx`, `<First> Example` names) and derive config-owned values from
+  `tests/fixtures/config.test.yaml` instead of hardcoding them. The
+  `testing-safely` skill has the full conventions.
+- **Real guest material stays gitignored** — `example-emails/`,
+  `tests/fixtures/emails/`, `config.yaml`, `.env`, `.secrets/`. Never
+  `git add --force` any of them.
+
+A **pre-commit hook enforces this**, scanning only the lines a commit *adds*
+(so material already in history does not re-flag, and deleting it is not a
+violation). It blocks on: a literal from the local name denylist
+(`.secrets/denylist-guest.txt` — gitignored, so a fresh clone will not have
+it; the hook then prints a notice and stands down rather than blocking), a
+real-looking phone number (555 placeholders exempt), or a staged path under
+one of the private-by-design directories above. Install it once per clone
+with `make setup` or `bash scripts/install_hooks.sh` — git hooks are not part
+of a repository and do not survive a clone. A deliberate, reviewed exception
+is `git commit --no-verify`.
+
 ### Keep the docs honest
 If implementation reveals something that contradicts `CONTEXT.md` or an ADR, update the doc before moving on. The docs are the source of truth for domain decisions; the code is the source of truth for implementation.
 

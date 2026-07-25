@@ -1,264 +1,324 @@
 # Home Rental Automation
 
-A self-hosted Python service that automates the pre-arrival workflow for short-term rental properties listed on Airbnb and VRBO. When a booking confirmation email arrives, the service parses it, stores the booking, and drives a checklist of tasks (dashboard data entry, DocuSign guest form, Seam access code, Google Sheets cleaner row, HOA email) without owner intervention beyond entering the one or two fields the platforms withhold from confirmation emails. The automation scope is booking confirmation through guest check-in; everything after check-in is manual.
+A self-hosted Python service that runs the entire pre-arrival workflow for a
+short-term rental property listed on Airbnb and VRBO.
 
-## Migration
+A booking confirmation email arrives. The service parses it, creates the
+booking, and opens a checklist of tasks against it — send the guest a DocuSign
+registration form, program a time-bound door code on the smart lock, add a row
+to the cleaners' schedule, email the signed form to the HOA inside a legally
+awkward date window, and chase the owner for the two fields the listing
+platforms refuse to put in a confirmation email. Then it works that checklist,
+on its own, until the guest can walk in the door.
 
-This section documents how to back up and restore the application database and how to migrate the service to a new VPS host.
+**It has been running unattended in production since 2026-07-21**, against real
+bookings on a live listing. One VPS, one Docker Compose stack, no human in the
+loop between "booking confirmed" and "guest checks in".
 
-### Prerequisites
+---
 
-`POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` are defined in `.env` and consumed by the `db` service in `docker-compose.yml` via `${VAR}` substitution. The backup and restore scripts also invoke `docker compose exec db pg_dump`/`psql` with these variables, so the host shell must have them exported before running either script.
+## Contents
 
-Export them from `.env` using either of these equivalent methods:
+- [What it actually does](#what-it-actually-does)
+- [Architecture](#architecture)
+- [The dashboard](#the-dashboard)
+- [Domain rules that make this harder than it looks](#domain-rules-that-make-this-harder-than-it-looks)
+- [Tech stack](#tech-stack)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [How it was built](#how-it-was-built)
+- [Quick start](#quick-start)
+- [Repository map](#repository-map)
 
-```bash
-# Option 1 — source directly (works when .env is plain KEY=VALUE with no subshell export)
-source .env
+---
 
-# Option 2 — more portable export (handles comment lines)
-export $(grep -v '^#' .env | xargs)
+## What it actually does
+
+The automation scope is **booking confirmation → guest check-in**. Everything
+after check-in stays manual, on purpose — that is where a human is actually
+useful.
+
+| # | Task | Trigger | Integration |
+|---|---|---|---|
+| 1 | Detect and parse the booking | confirmation email lands in the feed inbox | Gmail API |
+| 2 | Alert the owner, with a deep link to the fields only they can supply | immediately | Gmail API |
+| 3 | Add a row to the cleaners' schedule, in chronological position | immediately | Google Sheets API |
+| 4 | Send the guest the HOA registration form | as soon as a guest email exists | DocuSign eSign API |
+| 5 | Program a door code, valid 4:00 PM check-in day → 11:00 AM checkout day | as soon as a guest phone exists | Seam API → Schlage lock |
+| 6 | Email the signed form to the HOA | inside the HOA's send window | Gmail API |
+| 7 | Chase unfilled fields and unsigned forms at 7 and 4 days out | scheduled | Gmail API |
+| 8 | On cancellation: void the envelope, delete the door code, alert for the rest | cancellation email | DocuSign + Seam |
+
+Each of those is a row in a `booking_tasks` table with its own state machine
+(`pending → waiting → in_progress → complete / failed / skipped`), so the system
+always knows what it has done, what it is waiting on, and what a human needs to
+look at.
+
+## Architecture
+
+One FastAPI process holds the web app, the webhook receiver, and an APScheduler
+instance. Postgres holds every booking, task and data point. Nothing else runs.
+
+```mermaid
+flowchart TD
+    AB["Airbnb"] --> INBOX["Booking-feed Gmail inbox<br/>auto-forwarded confirmations"]
+    VR["VRBO"] --> INBOX
+
+    INBOX --> POLL["poll_booking_feed<br/>APScheduler, every 5 min"]
+    POLL --> CLS{"classifier"}
+
+    CLS -->|booking confirmation| PARSE["Airbnb / VRBO parsers"]
+    CLS -->|cancellation| CANCEL["cancellation handler"]
+    CLS -->|unrecognised| DEAD["dead-letter row<br/>+ weekly drift digest"]
+
+    PARSE --> DB[("Postgres<br/>bookings · tasks · data-point provenance")]
+    CANCEL --> DB
+
+    DB --> DISPATCH["task dispatcher<br/>claim, then run one handler"]
+
+    DISPATCH --> T1["send guest form"] --> DOCUSIGN(["DocuSign eSign API"])
+    DISPATCH --> T2["create door code"] --> SEAM(["Seam API → Schlage lock"])
+    DISPATCH --> T3["add cleaner row"] --> SHEETS(["Google Sheets API"])
+    DISPATCH --> T4["email signed form to HOA"] --> GMAIL(["Gmail send API"])
+    DISPATCH --> T5["owner alerts and reminders"] --> GMAIL
+
+    DOCUSIGN -.->|Connect webhook, HMAC-verified| HOOK["POST /webhooks/docusign"]
+    HOOK --> PDF["store the signed PDF"] --> DB
+
+    DB --> DASH["dashboard<br/>FastAPI + Jinja2, Google OIDC + allowlist"]
+    DASH -->|owner enters phone / email| DB
+
+    SCHED["scheduled jobs<br/>HOA window hourly · reminders 08:00 ET<br/>requeue stalled 08:30 · verify door codes 09:00<br/>credential sentinel · token keep-alive · drift digest"] --> DB
 ```
 
-In addition, `docker compose up` must be running and the `db` service must be healthy before backup or restore commands will work, because both scripts use `docker compose exec` to reach the running container.
+Three things in that picture are worth calling out:
 
-### Backup
+- **The classifier fails loudly, not silently.** An email that looks like a
+  booking but will not parse becomes a dead-letter row *and* an owner alert. An
+  email that does not look like a booking is dead-lettered quietly — but if it
+  came from a platform domain it shows up in a weekly review digest, because
+  "the platform changed its email format" is the failure mode that would
+  otherwise take months to notice.
+- **Tasks are claimed before they run.** A task moves to `in_progress` under a
+  row lock, so a dashboard action and a scheduler tick cannot double-send an
+  envelope or double-write a spreadsheet row.
+- **Every field carries its provenance.** Guest name, phone, email and dates
+  each record where they came from — email parse, manual entry, DocuSign
+  webhook, Seam. When the system's picture of a booking is wrong, the dashboard
+  says who told it that.
 
-```bash
-bash scripts/backup.sh
-```
+## The dashboard
 
-The script produces two files: `backup_YYYYMMDD_HHMMSS.sql` (a `pg_dump` of the database, plain SQL format — no `-Fc` flag, so it is human-readable and restorable with `psql`) and `pdfs_YYYYMMDD_HHMMSS.tar.gz` (a tar of the `pdf_data` volume's `pdfs/` directory — the signed DocuSign forms, which live outside Postgres and would otherwise be in no backup at all — F-A, bug hunt 2026-07-22). Both are written to `BACKUP_DIR` (default: current directory) and chmod 600.
+Read-mostly, behind per-user Google sign-in with an email allowlist that is
+re-checked on every request. The one write path is the contact form, because
+that is the one thing the platforms will not give the system.
 
-Neither file is gitignored by name pattern accident — `backup_*.sql` and `pdfs_*.tar.gz` are explicitly excluded in `.gitignore`. You are responsible for transferring them to secure, off-host storage if you need recovery beyond this VPS (the nightly cron below only protects against local mistakes/corruption, not a lost host).
+![Booking list](docs/images/dashboard-list.png)
 
-Two env vars tune it: `BACKUP_DIR` (destination directory, created if missing) and `RETENTION_DAYS` (default `14` — backups older than this are pruned by filename pattern, scoped to `BACKUP_DIR`).
+Status is derived, not stored — it answers "who is the ball with": `action
+needed` means the owner, `waiting on guest` means the signature, `scheduled`
+means a date window, `failed` means look now.
 
-**Nightly cron (production):** a crontab entry runs this automatically — see "Production operations" below for the exact line and current status on `the-vps`.
+![Booking detail with its task checklist](docs/images/booking-detail.png)
 
-### Restore
+*(All data shown is fabricated for the screenshots — placeholder names, `555`
+phone numbers and `example.com` addresses.)*
 
-```bash
-bash scripts/restore.sh backup_YYYYMMDD_HHMMSS.sql
-```
+## Domain rules that make this harder than it looks
 
-The script invokes `docker compose exec -T db psql -U "${POSTGRES_USER}" "${POSTGRES_DB}" < $1`. It uses `psql`, not `pg_restore` — plain SQL format and custom format are not interchangeable.
+Most of the difficulty in this project was not the integrations. It was that
+the real world has rules like these, and getting one of them subtly wrong means
+a guest arrives at a locked door.
 
-Restore is destructive on conflicting rows. Restoring into a non-empty database may fail on duplicate key violations or produce duplicate data. For a clean restore, either drop and recreate the target database first, or target a fresh container.
+**The HOA send window.** The signed form may be emailed no earlier than 7 days
+before check-in, and no later than the last day that still leaves two full
+*HOA-open* days strictly between the send day and check-in. The HOA is closed
+Sundays. The send day itself never counts as lead time and may itself be a
+closed day. A Sunday check-in therefore has a Thursday deadline. Every
+comparison uses the US/Eastern calendar date, never the server clock — the
+production container runs UTC, which is already tomorrow from 8 PM ET.
 
-The dump sets object ownership to the `POSTGRES_USER` role (via `OWNER TO`) but does not `CREATE ROLE` it. Restore therefore must run against a database whose owning role already exists — which is the case for the standard flow below, because `docker compose up` creates that role from `POSTGRES_USER` when the `db` volume is first initialized, before the restore step.
+![HOA registration panel](docs/images/hoa-panel.png)
 
-To restore the PDF volume from a `pdfs_YYYYMMDD_HHMMSS.tar.gz` backup:
+And late signatures still send: the deadline is the last *acceptable* day for
+the scheduled send, not a send-blocker. Late is better than never.
 
-```bash
-docker compose exec -T app tar xzf - -C /app/data < pdfs_YYYYMMDD_HHMMSS.tar.gz
-```
+**Door codes are time-bound.** Active from 4:00 PM on check-in day to 11:00 AM
+on checkout day, US/Eastern. Stored in UTC, converted at the Seam boundary. A
+daily job re-reads the lock to confirm the code is actually on the device,
+because Seam programs hardware asynchronously and "the API accepted it" is not
+the same as "the guest can get in".
 
-This is additive (extracts on top of whatever is already in the volume) — fine for disaster recovery into an empty volume, but check for conflicts first if the volume already has PDFs.
+**The cleaners' spreadsheet has an opinion.** Rows are chronological by
+check-in date, new rows are inserted at the correct position rather than
+appended, and there is a sentinel row that must stay at the bottom. It is
+someone else's spreadsheet; the system writes four columns and touches nothing
+else.
 
-### Full VPS Migration Procedure
+**Some fields simply are not in the email.** Airbnb withholds the guest's phone
+number and email address; VRBO withholds the email. There is no supported API
+for a co-host to fetch them. Scraping was tried and
+[deliberately abandoned](docs/adr/0004-manual-data-entry-replaces-scraping.md) —
+so the design makes the gap explicit: downstream tasks sit in `waiting`, the
+owner gets a deep link, and reminders escalate at 7 and 4 days out.
 
-1. **On the old host:** export env vars and create a backup.
+**Cancellation is half automatic on purpose.** Voiding the DocuSign envelope
+and deleting the door code are safe to automate. Un-emailing an HOA and
+removing a row from someone else's spreadsheet are not, so those become alerts
+with instructions instead.
 
-   ```bash
-   source .env && bash scripts/backup.sh
-   ```
+## Tech stack
 
-   This produces `backup_YYYYMMDD_HHMMSS.sql` and `pdfs_YYYYMMDD_HHMMSS.tar.gz` in the current directory (the latter is the signed-PDF volume — see "What is NOT migrated by these scripts" below).
+| Layer | Choice |
+|---|---|
+| Language | Python 3.12 |
+| Web | FastAPI + Jinja2 templates, hand-written CSS, no build step |
+| Database | PostgreSQL 17 via SQLAlchemy 2 async |
+| Migrations | Alembic, applied on container start |
+| Scheduler | APScheduler, in-process |
+| Auth | Google OIDC (Authlib) + signed session cookie + config allowlist |
+| Tests | pytest + pytest-asyncio |
+| Runtime | Docker Compose; Caddy for TLS |
+| Integrations | Gmail API, DocuSign eSign + Connect, Seam, Google Sheets |
 
-2. **Copy the following to the new host** via `scp`, `rsync`, or manual transfer:
-   - The repository (either `git clone` from remote or `scp` the directory)
-   - `.env`
-   - `config.yaml`
-   - The `backup_*.sql` and `pdfs_*.tar.gz` files produced in step 1
+No frontend framework, no message broker, no Redis, no Celery. One property,
+one owner, a handful of bookings a month — the scheduler and Postgres are
+enough, and every component removed is a component that cannot wake anyone at
+3 a.m.
 
-3. **On the new host:** install Docker and Docker Compose, then start the stack.
+## Testing
 
-   ```bash
-   docker compose up -d
-   ```
-
-   This brings up the `app` and `db` services. The `app` service will refuse to start if any required credential is missing in `.env` — it will name the missing field in the error. Resolve credential gaps before proceeding.
-
-4. **On the new host:** export env vars and restore the database, then restore the PDF volume.
-
-   ```bash
-   source .env && bash scripts/restore.sh backup_YYYYMMDD_HHMMSS.sql
-   docker compose exec -T app tar xzf - -C /app/data < pdfs_YYYYMMDD_HHMMSS.tar.gz
-   ```
-
-5. **Verify:** confirm the service is healthy.
-
-   ```bash
-   # Caddy 308-redirects http -> https, so follow redirects and target HTTPS.
-   # On a real domain with a valid certificate:
-   curl -L http://<your-domain>/health
-   # On localhost (Caddy serves an internal self-signed cert), add -k:
-   curl -kL https://localhost/health
-   # Or bypass Caddy and hit the app directly (port 8000 is published):
-   curl http://localhost:8000/health
-   ```
-
-   The final response should be `200` with body `{"status":"ok"}`. Note that a bare
-   `curl http://localhost/health` returns `308` — the redirect to HTTPS — **not** `200`;
-   that is expected, not an error. Also check application logs (`docker compose logs app`)
-   for a clean startup. On boot the Docker entrypoint runs `alembic upgrade head` before
-   uvicorn, so a fresh database is migrated automatically. The `app/main.py` lifespan then
-   runs the credential guard: it validates the required API credentials (including the
-   `GOOGLE_OAUTH_CLIENT_ID`/`SECRET` for dashboard Google login) and rejects a default or
-   placeholder `SECRET_KEY` or `DATABASE_URL`, refusing to start with a clear error naming
-   the offending field if any check fails. (Dashboard access is per-user Google login with
-   an email allowlist in `config.yaml`; there is no shared dashboard password.)
-
-### What is NOT migrated by these scripts
-
-- **APScheduler state**: Jobs are registered in-memory at startup and re-register automatically on each start. No migration needed.
-- **OAuth refresh tokens**: These live in `.env`, which is copied in step 2. They survive migration as long as `.env` is transferred.
-
-Signed DocuSign PDFs (`pdf_data` Docker named volume, mounted at `/app/data`; written under `/app/data/pdfs/<booking-id>.pdf`) used to be in this "not migrated" list — `scripts/backup.sh` now tars them alongside the SQL dump (F-A, bug hunt 2026-07-22), so step 1/2/4 above cover them like any other backup file.
-
-## Production operations
-
-The live deployment runs on **`the-vps`** at **`https://arthur.example.com`** (reached over Tailscale SSH; repo at `~/Documents/workspace/home-rental-automation`).
-
-### Sandbox vs production
-
-Two integrations have a sandbox/production distinction, both selected by `.env`:
-
-- **DocuSign** — `DOCUSIGN_SANDBOX=true` targets the demo hosts; `false` targets production. In production, DocuSign is **multi-region**: `DOCUSIGN_API_BASE_URI` must be this account's own REST base from OAuth userinfo (e.g. `https://na4.docusign.net/restapi`) — a global host like `www.docusign.net` will fail for a non-www account. The five `DOCUSIGN_*` credentials, the Connect **HMAC key**, and `config.yaml`'s `docusign_template_id` are all account-scoped: production values differ from sandbox and do **not** transfer at go-live (redirect URIs and secrets must be re-added in the production Apps & Keys).
-- **Seam** — the API key *is* the environment. The production key points at the production workspace and the real lock (`seam_device_id` in `config.yaml`).
-
-**Confirm which environment is live** — every boot logs it:
+**TDD is a hard rule in this repo, not an aspiration.** Every production change
+starts with a failing test. The test suite is more than twice the size of the
+application code, and it runs in CI on every push.
 
 ```bash
-docker compose logs app | grep "DocuSign target"
-# PRODUCTION → "... PRODUCTION (real envelopes, real money) | oauth=account.docusign.com | api=https://na4.docusign.net/restapi"
-# SANDBOX    → "... SANDBOX (demo tier) | oauth=account-d.docusign.com | api=https://demo.docusign.net/restapi"
+make test          # offline: unit + integration, no credentials, ~15s
+make test-live     # the same integration scenarios against real sandbox APIs
 ```
 
-### Rollback (aborting go-live)
+Three properties the suite is built around, each of which was learned the hard
+way and is documented in `TESTING.md`:
 
-To revert to sandbox — e.g. if a production issue needs isolating — restore the sandbox values in `.env` and `config.yaml` and recreate the app:
+- **The offline suite needs no credentials and no network.** External responses
+  are replayed from recorded fixtures, so a stranger can clone this repo and
+  get a green run. CI proves that claim on every push.
+- **Test data contains no real people.** Placeholder names, `555` phone
+  numbers, `example.com` addresses, and expectations derived from
+  `tests/fixtures/config.test.yaml` rather than hardcoded — a test asserting
+  the operator's real email address is a test coupled to facts it has no
+  business knowing.
+- **Live tests are opt-in and guarded.** The test environment can load real
+  credentials, so any path that sends email or touches DocuSign, Seam or
+  Sheets is mocked at the calling module by default. The conventions are
+  written down in `.claude/skills/testing-safely/`.
 
-1. In `.env`: restore the five sandbox `DOCUSIGN_*` values + the sandbox `DOCUSIGN_HMAC_KEY` + the sandbox `SEAM_API_KEY`; set `DOCUSIGN_SANDBOX=true`; clear `DOCUSIGN_API_BASE_URI=`.
-2. In `config.yaml`: restore the sandbox `docusign_template_id` and `seam_device_id`.
-3. `docker compose up -d --build app`, then confirm the banner reads **SANDBOX**.
+Fixtures for the email parsers came from real messages, and that mattered: the
+VRBO parser passed against synthetic fixtures for weeks while being unable to
+parse a single real VRBO booking, because real emails label fields with a
+trailing colon and the fixtures did not. That bug was caught by a live alert,
+not by a test.
 
-(The swap is symmetric — going live is the same steps in reverse.) Note: the sandbox credential set is **not** recorded anywhere off-host — rolling back to sandbox requires re-minting sandbox credentials (DocuSign demo app, Seam sandbox workspace) from scratch.
+## Deployment
 
-### DocuSign token upkeep
+One `docker compose up` on any Linux host with Docker:
 
-The production **refresh token expires 30 days after its last use**. The weekly `refresh_docusign_token` keep-alive job resets that clock (a token-only exchange — no envelope, no cost), and every rotation is persisted to **`/app/data/docusign_refresh_token`** on the `pdf_data` volume, so rotations **survive container restarts** — the exchange prefers that stored token over the (possibly stale) `.env` one, and falls back to `.env` automatically if the stored token is ever rejected. A failed keep-alive **emails the owner** (weekly at most).
+- `app` — FastAPI + APScheduler, published on loopback only
+- `db` — PostgreSQL 17 on a named volume
+- `caddy` — TLS termination and reverse proxy
 
-Re-minting is therefore only needed if the keep-alive alert fires repeatedly, the `pdf_data` volume is lost, or the stack is down >30 days:
+The entrypoint runs `alembic upgrade head` before uvicorn, so a fresh database
+migrates itself and a deploy carrying a new migration applies it. Startup then
+runs a credential guard that refuses to boot on a missing credential, a
+placeholder `SECRET_KEY`, or an unconfigured `DATABASE_URL` — naming the
+offending field. A service that runs unattended should fail at boot, loudly,
+rather than at 3 a.m., quietly.
+
+**Portability is a requirement, not a nice-to-have.** Moving to a new host is
+`pg_dump` → copy the repo, `.env`, `config.yaml` and the backup files →
+`docker compose up` → restore. No vendor-specific steps, no managed services to
+re-provision.
+
+Because the app cannot report its own death — every alert it sends travels
+through its own Gmail token — the outermost layer of monitoring is external:
+uptime checks from outside the host, and dead-man's-switch heartbeats that page
+when a job stops succeeding rather than when it fails. Inside the app, a daily
+credential sentinel probes every integration read-only, a daily job retries
+failed automations and digests the stuck ones, and a monthly status email
+proves the send path still works — its *absence* is the alarm.
+
+Full procedures — backup, restore, off-site copies, migration, monitoring,
+credential rotation: [`docs/operations.md`](docs/operations.md).
+
+## How it was built
+
+[**`GETTING-TO-PRODUCTION.md`**](GETTING-TO-PRODUCTION.md) is the honest
+version of this project.
+
+It is the 22-step runbook that took the codebase from "the tests pass on my
+laptop" to a service handling real money and real guests, with a Session Log
+entry for every step: what broke, what the wrong assumption was, and what the
+fix was. Among other things it records the day the dashboard's stylesheet was
+discovered to have never once reached a browser (Caddy terminated TLS, uvicorn
+ran without `--proxy-headers`, the app built an `http://` stylesheet URL inside
+an `https://` page, and every browser silently blocked it as mixed content —
+no test could see it, because `TestClient` never enforces a scheme); the
+DocuSign anti-fraud filter that voided the go-live envelope because the
+account's admin address was a `@gmail.com` one; and the 17-finding bug hunt
+that followed go-live.
+
+It is long, and it is the most useful thing in this repository.
+
+Also worth a look:
+
+- [`CONTEXT.md`](CONTEXT.md) — the domain glossary and task graph. Written
+  before the code, and kept true to it.
+- [`docs/adr/`](docs/adr/) — architecture decisions, including the one where
+  web scraping was built, evaluated and thrown away.
+- [`docs/risk-register.md`](docs/risk-register.md) — every known risk with its
+  final disposition: fixed, accepted, or deferred with a revisit trigger.
+
+## Quick start
 
 ```bash
-# From your laptop (the redirect URI http://localhost:8765/callback must be
-# registered in the PRODUCTION Apps & Keys):
-ssh -t -L 8765:localhost:8765 jack@the-vps \
-  'cd ~/Documents/workspace/home-rental-automation && \
-   python3 scripts/manual/get_docusign_refresh_token.py production'
-```
-
-Then `docker compose up -d --force-recreate app` so the app loads the new token.
-
-### Nightly backups
-
-`scripts/backup.sh` is operator-invoked — nothing in the repo schedules it. On `the-vps` a crontab entry runs it nightly (F-A, bug hunt 2026-07-22):
-
-```cron
-0 3 * * * cd ~/Documents/workspace/home-rental-automation && \
-  bash -c 'set -a; source .env; set +a; \
-    BACKUP_DIR=$HOME/backups/home-rental-automation RETENTION_DAYS=14 bash scripts/backup.sh && \
-    BACKUP_DIR=$HOME/backups/home-rental-automation bash scripts/offsite_backup.sh && \
-    curl -fsS --retry 3 "$HEALTHCHECKS_PING_URL_BACKUP"' \
-  >> $HOME/backups/home-rental-automation/cron.log 2>&1
-```
-
-The chain is deliberate: the heartbeat ping fires only after BOTH the local
-backup and the off-site upload succeed, so a silent failure of either shows up
-as heartbeat silence at healthchecks.io. Install this version only once the
-R2 (`R2_*`, `BACKUP_ENCRYPTION_PASSPHRASE`) and `HEALTHCHECKS_PING_URL_BACKUP`
-values are filled in `.env` — with them missing, `offsite_backup.sh` exits
-non-zero and every night would page you.
-
-Install with `crontab -e` on the VPS. `BACKUP_DIR` keeps output out of the git working tree; `RETENTION_DAYS=14` matches the script's default (set explicitly here so the crontab line is self-documenting). This protects against local mistakes and corruption — it is **not** off-host disaster recovery; the backups live on the same VPS as the data they're backing up, so a lost host loses both. Periodically copy `$HOME/backups/home-rental-automation` off-host (e.g. `rsync` to a laptop or a second location) if that risk matters to you.
-
-### External monitoring (heartbeats + uptime)
-
-The app cannot report its own death — every alert it sends travels through its
-own Gmail token — so monitoring is external (sustainability audit 2026-07-23):
-
-- **Uptime** (UptimeRobot): checks `https://arthur.example.com/health` (and
-  the wedding domain) from outside; catches app/host/Caddy/TLS failures.
-- **Heartbeats** (healthchecks.io): jobs ping a unique URL only on **success**;
-  the monitor alerts when pings stop, via its own email/push. Four checks:
-
-  | Check | Pinged by | Expected cadence |
-  |---|---|---|
-  | poller | every completed poll cycle | 5 min (alert after ~15–20 min silence) |
-  | credential-sentinel | daily `verify_credentials` job, all checks passing | daily |
-  | docusign-keepalive | weekly keep-alive success | weekly (Mon 03:30 ET) |
-  | nightly-backup | the backup crontab line, after local + off-site backup succeed | daily |
-
-  The ping URLs live in `.env` (`HEALTHCHECKS_PING_URL_*`); empty = pings are
-  silently skipped, so the app runs fine before the monitor is configured.
-  After editing `.env` on the VPS, `docker compose up -d --force-recreate app`.
-
-Related in-app monitoring: `verify_credentials` (07:00 ET) actively probes all
-Google tokens + the dashboard OAuth client + Seam daily, read-only;
-`check_classifier_drift` (Sun 09:00 ET) emails a weekly review digest of
-platform-domain emails that fell to OTHER (possible email-format drift — read
-it); `send_monthly_status_email` (1st, 08:00 ET) sends a systems-normal report
-whose **absence** is itself an alarm.
-
-### Off-site backups (Cloudflare R2)
-
-`scripts/offsite_backup.sh` (chained after `backup.sh` in the crontab)
-gpg-encrypts and uploads the newest DB dump, PDF tarball, `.env`, and
-`config.yaml` to a private R2 bucket, verifies the upload, and prunes each
-file type to the newest `OFFSITE_RETENTION_COUNT` (default 25) versions.
-Config lives in `.env` (`R2_*`, `BACKUP_ENCRYPTION_PASSPHRASE`); requires
-`rclone` and `gpg` on the host. **Keep the passphrase in your password
-manager** — without it the off-site copies are unreadable.
-
-Restore a file:
-
-```bash
-rclone lsf r2off:$R2_BUCKET          # (or use the Cloudflare dashboard)
-gpg -d --passphrase "$BACKUP_ENCRYPTION_PASSPHRASE" --batch db_YYYY….sql.gpg > restore.sql
-```
-
-Full-host recovery = README migration procedure, sourcing the four newest
-objects from the bucket instead of the dead VPS.
-
-### ⚠️ This host is multi-tenant (shared Caddy)
-
-`the-vps` also serves the **wedding website** (`wedding.example.com`) through *this* project's Caddy, which is the shared front proxy for the host. Before any `docker compose` here:
-
-- Prefer **`docker compose up -d --build app`** (app only) — recreating `caddy` briefly drops the wedding site too.
-- `docker compose up` **fails if the external `wedding_default` network is absent** — start the wedding stack first (`cd ~/Documents/workspace/wedding-website && docker compose up -d`); never remove the network reference.
-- **Never edit `/home/jack/caddy-sites/*`** (owned by the wedding deploy pipeline) and **never rename** this compose project or the `caddy` service (the wedding deploy reloads it by container name).
-
-### Editing `config.yaml` on a running stack
-
-`config.yaml` is a **bind-mounted single file**. Editors that write via atomic rename (`sed -i`, most editors) change the file's inode, and the running container stays pinned to the old one — so a plain `docker compose restart` will **not** pick up the change. After editing `config.yaml`, run **`docker compose up -d --force-recreate app`**.
-
-## Quick Start (Local Development)
-
-```bash
-cp .env.template .env          # fill in all credential values
-cp config.example.yaml config.yaml   # fill in property-specific settings
+cp .env.template .env                # fill in credentials
+cp config.example.yaml config.yaml   # fill in property settings
+make setup                           # install the git hooks
 docker compose up
 ```
 
-See `CLAUDE.md` for full development guidelines, TDD requirements, and the tech stack reference.
+The dashboard is on `https://localhost` (Caddy serves an internal certificate
+locally) or `http://localhost:8000` direct. `docs/credential-setup.md` walks
+through obtaining each credential; there are more of them than you would like.
 
-## Further Reading
+## Repository map
 
-- `CLAUDE.md` — development conventions, TDD requirements, tech stack, domain rules
-- `CONTEXT.md` — domain glossary and task graph
-- `docs/implementation-plan.md` — phase-by-phase build plan
-- `GETTING-TO-PRODUCTION.md` — the 22-step build-to-production runbook and its full Session Log: every bug found, decision made, and incident hit on the way to a live service
-- `TESTING.md` — suite layout, offline-vs-live selection, and the E2E go-live gate
-- `docs/risk-register.md` — every documented risk with its final disposition
+```
+app/
+  ingestion/      poller, classifier, Airbnb + VRBO parsers, cancellation
+  tasks/          state machine, claim + dispatch, handlers, scheduled jobs
+  integrations/   gmail, docusign, seam, sheets, hoa (window math + email)
+  routers/        dashboard, auth, webhooks, health
+  db/             SQLAlchemy models and session
+  templates/      Jinja2 + one hand-written stylesheet
+tests/            unit · integration · e2e
+alembic/          migrations
+docs/             ADRs, operations, credential setup, risk register, flow map
+scripts/          backup, restore, off-site backup, manual drivers, git hooks
+.claude/skills/   task-specific runbooks used while developing this repo
+```
+
+---
+
+## Further reading
+
+- [`CLAUDE.md`](CLAUDE.md) — development conventions, TDD rules, domain
+  invariants that must not be broken in code
+- [`CONTEXT.md`](CONTEXT.md) — domain glossary and task graph
+- [`TESTING.md`](TESTING.md) — suite layout, offline vs live selection
+- [`docs/operations.md`](docs/operations.md) — deploy, back up, migrate, monitor
+- [`docs/implementation-plan.md`](docs/implementation-plan.md) — the phased
+  build plan
+- [`docs/flow-map.md`](docs/flow-map.md) — end-to-end trace of a booking
+- [`GETTING-TO-PRODUCTION.md`](GETTING-TO-PRODUCTION.md) — the build-to-production
+  runbook and its Session Log

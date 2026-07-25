@@ -19,7 +19,7 @@ set -euo pipefail
 #   BACKUP_ENCRYPTION_PASSPHRASE
 # Optional: OFFSITE_RETENTION_COUNT (default 25), BACKUP_DIR (default .)
 #
-# Requires: rclone, gpg. Restore procedure: README "Off-site backups".
+# Requires: rclone, gpg. Restore procedure: docs/operations.md "Off-site backups".
 
 BACKUP_DIR="${BACKUP_DIR:-.}"
 RETENTION_COUNT="${OFFSITE_RETENTION_COUNT:-25}"
