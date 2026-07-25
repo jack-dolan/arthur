@@ -16,7 +16,7 @@ One Docker Compose stack on a single VPS:
 | `caddy` | `caddy:2` | TLS termination and reverse proxy on 80/443 |
 
 The app publishes only on `127.0.0.1:8000`. Public traffic must arrive through
-Caddy, which reaches the app over the internal Docker network — publishing on
+Caddy, which reaches the app over the internal Docker network. Publishing on
 `0.0.0.0` would expose the dashboard session cookie in plaintext HTTP.
 
 `docker-entrypoint.sh` runs `alembic upgrade head` before starting uvicorn, so
@@ -25,7 +25,7 @@ migration applies it automatically.
 
 On startup the lifespan handler runs a credential guard: it refuses to boot if
 any required credential is missing, if `SECRET_KEY` is still the placeholder,
-or if `DATABASE_URL` still contains `change_me` — naming the offending field in
+or if `DATABASE_URL` still contains `change_me`, naming the offending field in
 the error. A service that runs unattended should fail loudly at boot rather
 than quietly at 3 a.m.
 
@@ -46,7 +46,7 @@ host, and no app change requires it.
 
 `config.yaml` is a **bind-mounted single file**. Editors that write via atomic
 rename (`sed -i`, most editors) change the file's inode, and the running
-container stays pinned to the old one — so a plain `docker compose restart`
+container stays pinned to the old one, so a plain `docker compose restart`
 will **not** pick up the change. After editing `config.yaml`:
 
 ```bash
@@ -59,19 +59,19 @@ docker compose up -d --force-recreate app
 
 Two integrations have a sandbox/production distinction, both selected by `.env`:
 
-- **DocuSign** — `DOCUSIGN_SANDBOX=true` targets the demo hosts; `false` targets
+- **DocuSign**: `DOCUSIGN_SANDBOX=true` targets the demo hosts; `false` targets
   production. In production, DocuSign is **multi-region**:
   `DOCUSIGN_API_BASE_URI` must be this account's own REST base from OAuth
-  userinfo (e.g. `https://na4.docusign.net/restapi`) — a global host like
+  userinfo (e.g. `https://na4.docusign.net/restapi`). A global host like
   `www.docusign.net` will fail for a non-www account. The five `DOCUSIGN_*`
   credentials, the Connect **HMAC key**, and `config.yaml`'s
   `docusign_template_id` are all account-scoped: production values differ from
   sandbox and do **not** transfer at go-live (redirect URIs and secrets must be
   re-added in the production Apps & Keys).
-- **Seam** — the API key *is* the environment. The production key points at the
+- **Seam**: the API key *is* the environment. The production key points at the
   production workspace and the real lock (`seam_device_id` in `config.yaml`).
 
-**Confirm which environment is live** — every boot logs it:
+**Confirm which environment is live.** Every boot logs it:
 
 ```bash
 docker compose logs app | grep "DocuSign target"
@@ -91,7 +91,7 @@ Restore the sandbox values in `.env` and `config.yaml` and recreate the app:
 3. `docker compose up -d --build app`, then confirm the banner reads
    **SANDBOX**.
 
-(The swap is symmetric — going live is the same steps in reverse.) Note that a
+(The swap is symmetric: going live is the same steps in reverse.) Note that a
 sandbox credential set is not recorded anywhere off-host, so rolling back
 requires re-minting sandbox credentials from scratch.
 
@@ -100,8 +100,8 @@ requires re-minting sandbox credentials from scratch.
 ## DocuSign token upkeep
 
 The production **refresh token expires 30 days after its last use**. The weekly
-`refresh_docusign_token` keep-alive job resets that clock — a token-only
-exchange, no envelope, no cost — and every rotation is persisted to
+`refresh_docusign_token` keep-alive job resets that clock (a token-only
+exchange, no envelope, no cost), and every rotation is persisted to
 **`/app/data/docusign_refresh_token`** on the `pdf_data` volume, so rotations
 **survive container restarts**. The exchange prefers that stored token over the
 (possibly stale) `.env` one and falls back to `.env` automatically if the
@@ -133,10 +133,10 @@ substitution. The backup and restore scripts also invoke
 must have them exported before running either script:
 
 ```bash
-# Option 1 — source directly (works when .env is plain KEY=VALUE)
+# Option 1: source directly (works when .env is plain KEY=VALUE)
 source .env
 
-# Option 2 — more portable (skips comment lines)
+# Option 2: more portable (skips comment lines)
 export $(grep -v '^#' .env | xargs)
 ```
 
@@ -150,15 +150,15 @@ bash scripts/backup.sh
 ```
 
 Two files are produced: `backup_YYYYMMDD_HHMMSS.sql` (a `pg_dump` in plain SQL
-format — no `-Fc`, so it is human-readable and restorable with `psql`) and
+format, with no `-Fc`, so it is human-readable and restorable with `psql`) and
 `pdfs_YYYYMMDD_HHMMSS.tar.gz` (a tar of the `pdf_data` volume's `pdfs/`
-directory — the signed DocuSign forms, which live outside Postgres and would
-otherwise be in no backup at all). Both are written to `BACKUP_DIR` (default:
+directory, holding the signed DocuSign forms, which live outside Postgres and
+would otherwise be in no backup at all). Both are written to `BACKUP_DIR` (default:
 current directory) and `chmod 600`.
 
 Both filename patterns are explicitly gitignored. Two env vars tune the script:
 `BACKUP_DIR` (destination, created if missing) and `RETENTION_DAYS` (default
-`14` — older backups are pruned by filename pattern, scoped to `BACKUP_DIR`).
+`14`, so older backups are pruned by filename pattern, scoped to `BACKUP_DIR`).
 
 ### Nightly cron
 
@@ -179,12 +179,12 @@ The chain is deliberate: the heartbeat fires only after **both** the local
 backup and the off-site upload succeed, so a silent failure of either shows up
 as heartbeat silence. Install this version only once the R2 (`R2_*`,
 `BACKUP_ENCRYPTION_PASSPHRASE`) and `HEALTHCHECKS_PING_URL_BACKUP` values are
-filled in `.env` — with them missing, `offsite_backup.sh` exits non-zero and
+filled in `.env`. With them missing, `offsite_backup.sh` exits non-zero and
 every night would page you.
 
 `BACKUP_DIR` keeps output out of the git working tree. Local backups alone are
-**not** disaster recovery — they live on the same host as the data they protect,
-which is what the off-site copy below is for.
+**not** disaster recovery, since they live on the same host as the data they
+protect. That is what the off-site copy below is for.
 
 ### Off-site backups (Cloudflare R2)
 
@@ -193,7 +193,7 @@ tarball, `.env`, and `config.yaml` to a private R2 bucket, verifies the upload,
 and prunes each file type to the newest `OFFSITE_RETENTION_COUNT` (default 25)
 versions. Config lives in `.env` (`R2_*`, `BACKUP_ENCRYPTION_PASSPHRASE`);
 requires `rclone` and `gpg` on the host. **Keep the passphrase in a password
-manager** — without it the off-site copies are unreadable.
+manager.** Without it the off-site copies are unreadable.
 
 Restore a file:
 
@@ -211,7 +211,7 @@ bash scripts/restore.sh backup_YYYYMMDD_HHMMSS.sql
 ```
 
 The script runs `docker compose exec -T db psql -U "${POSTGRES_USER}" "${POSTGRES_DB}" < $1`.
-It uses `psql`, not `pg_restore` — plain SQL format and custom format are not
+It uses `psql`, not `pg_restore`. Plain SQL format and custom format are not
 interchangeable.
 
 Restore is destructive on conflicting rows. Restoring into a non-empty database
@@ -231,7 +231,7 @@ To restore the PDF volume:
 docker compose exec -T app tar xzf - -C /app/data < pdfs_YYYYMMDD_HHMMSS.tar.gz
 ```
 
-This is additive — fine for disaster recovery into an empty volume, but check
+This is additive, which is fine for disaster recovery into an empty volume, but check
 for conflicts first if the volume already has PDFs.
 
 ---
@@ -281,14 +281,14 @@ with no vendor-specific steps.
    ```
 
    Expect `200` with body `{"status":"ok"}`. A bare `curl http://localhost/health`
-   returns `308` — the redirect to HTTPS — which is expected, not an error.
+   returns `308`, the redirect to HTTPS, which is expected rather than an error.
    Also check `docker compose logs app` for a clean startup.
 
 ### What the scripts do not migrate
 
-- **APScheduler state** — jobs are registered in memory at startup and
+- **APScheduler state**: jobs are registered in memory at startup and
   re-register on each start. Nothing to migrate.
-- **OAuth refresh tokens** — they live in `.env`, which is copied in step 2.
+- **OAuth refresh tokens**: they live in `.env`, which is copied in step 2.
 
 Signed DocuSign PDFs used to be on this list; `scripts/backup.sh` now tars them
 alongside the SQL dump, so steps 1, 2 and 4 cover them like any other backup
@@ -298,8 +298,8 @@ file.
 
 ## Monitoring
 
-The app cannot report its own death — every alert it sends travels through its
-own Gmail token — so the outermost layer of monitoring is external.
+The app cannot report its own death, because every alert it sends travels through its own
+Gmail token, so the outermost layer of monitoring is external.
 
 - **Uptime** (UptimeRobot): checks `/health` from outside the host; catches
   app, host, Caddy and TLS failures.
@@ -308,7 +308,7 @@ own Gmail token — so the outermost layer of monitoring is external.
 
   | Check | Pinged by | Expected cadence |
   |---|---|---|
-  | poller | every completed poll cycle | 5 min (alert after ~15–20 min silence) |
+  | poller | every completed poll cycle | 5 min (alert after 15 to 20 min of silence) |
   | credential-sentinel | daily `verify_credentials`, all checks passing | daily |
   | docusign-keepalive | weekly keep-alive success | weekly (Mon 03:30 ET) |
   | nightly-backup | the backup crontab, after local + off-site succeed | daily |
@@ -324,7 +324,7 @@ In-app monitoring jobs complement this:
 | `verify_credentials` | daily 07:00 ET | every integration credential still works (read-only probes) |
 | `requeue_stalled_automations` | daily 08:30 ET | FAILED tasks are retried; orphaned PENDING tasks are re-dispatched; a digest goes to the owner |
 | `verify_access_codes` | daily 09:00 ET | door codes for upcoming stays actually exist on the lock (Seam programs devices asynchronously) |
-| `check_classifier_drift` | Sun 09:00 ET | platform emails falling through to OTHER get a human-review digest — the silent failure mode when a platform changes its email format |
+| `check_classifier_drift` | Sun 09:00 ET | platform emails falling through to OTHER get a human-review digest, which is the silent failure mode when a platform changes its email format |
 | `send_monthly_status_email` | 1st, 08:00 ET | the alert send path works end to end; the report's **absence** is itself an alarm |
 
 ---
