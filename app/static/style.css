@@ -38,6 +38,8 @@
   --state-waiting_on_guest-tint: #dbeafe;
   --state-scheduled-ink: #134e4a;
   --state-scheduled-tint: #ccfbf1;
+  --state-unknown-ink: #581c87;
+  --state-unknown-tint: #f3e8ff;
 
   --stripe: #f9fafb;
 
@@ -209,6 +211,11 @@ a:hover {
 .badge-platform {
   color: var(--state-in_progress-ink);
   background: var(--state-in_progress-tint);
+}
+
+.badge-unknown {
+  color: var(--state-unknown-ink);
+  background: var(--state-unknown-tint);
 }
 
 .badge-pending {

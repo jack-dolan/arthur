@@ -34,9 +34,10 @@ import hashlib
 import hmac
 import json
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
@@ -59,7 +60,9 @@ from app.ingestion.classifier import EmailType
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 from tests.conftest import recorded_email_bytes
 
-TODAY = date.today()
+# Scheduled jobs define booking-day boundaries in the property's timezone.
+# Keep test fixtures on that same calendar day even when CI runs after 00:00 UTC.
+TODAY = datetime.now(ZoneInfo("America/New_York")).date()
 
 # Reused module-level references to load_config so every trigger's config lookup
 # resolves to the committed test fixture (property_id == "test_property").

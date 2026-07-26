@@ -4,20 +4,15 @@
   <a href="/">&#8592; Back to bookings</a>
 
   <h1>{{ booking.guest_first_name }} {{ booking.guest_last_name }}
-    <span class="badge badge-platform">{{ booking.platform.value }}</span>
+    <span class="badge badge-{{ enum_badge(booking.platform) }}">{{ platform_label(booking.platform) }}</span>
+    {% if enum_badge(booking.status) == "unknown" %}
+    <span class="badge badge-unknown">{{ booking_status_label(booking.status) }}</span>
+    {% endif %}
     <span class="badge badge-{{ summary.status }}">{{ summary.status.replace("_", " ") }}</span>
   </h1>
 
   <section>
     <h2>Guest Info</h2>
-    {% set source_labels = {
-      "email_parse": "email parse",
-      "manual_entry": "manual entry",
-      "web_scrape": "web scrape",
-      "docusign_webhook": "DocuSign webhook",
-      "seam_api": "Seam API",
-      "system_default": "system default"
-    } %}
     <div class="table-wrap">
     <table>
       <thead>
@@ -31,32 +26,32 @@
         <tr>
           <td>First Name</td>
           <td>{{ booking.guest_first_name or "—" }}</td>
-          <td>{% if provenance.guest_first_name %}<small>{{ source_labels[provenance.guest_first_name.source.value] }} · {{ provenance.guest_first_name.recorded_at }}</small>{% else %}—{% endif %}</td>
+          <td>{% if provenance.guest_first_name %}<small>{{ source_label(provenance.guest_first_name.source) }} · {{ provenance.guest_first_name.recorded_at }}</small>{% else %}—{% endif %}</td>
         </tr>
         <tr>
           <td>Last Name</td>
           <td>{{ booking.guest_last_name or "—" }}</td>
-          <td>{% if provenance.guest_last_name %}<small>{{ source_labels[provenance.guest_last_name.source.value] }} · {{ provenance.guest_last_name.recorded_at }}</small>{% else %}—{% endif %}</td>
+          <td>{% if provenance.guest_last_name %}<small>{{ source_label(provenance.guest_last_name.source) }} · {{ provenance.guest_last_name.recorded_at }}</small>{% else %}—{% endif %}</td>
         </tr>
         <tr>
           <td>Phone</td>
           <td>{{ booking.guest_phone or "—" }}</td>
-          <td>{% if provenance.guest_phone %}<small>{{ source_labels[provenance.guest_phone.source.value] }} · {{ provenance.guest_phone.recorded_at }}</small>{% else %}—{% endif %}</td>
+          <td>{% if provenance.guest_phone %}<small>{{ source_label(provenance.guest_phone.source) }} · {{ provenance.guest_phone.recorded_at }}</small>{% else %}—{% endif %}</td>
         </tr>
         <tr>
           <td>Email</td>
           <td>{{ booking.guest_email or "—" }}</td>
-          <td>{% if provenance.guest_email %}<small>{{ source_labels[provenance.guest_email.source.value] }} · {{ provenance.guest_email.recorded_at }}</small>{% else %}—{% endif %}</td>
+          <td>{% if provenance.guest_email %}<small>{{ source_label(provenance.guest_email.source) }} · {{ provenance.guest_email.recorded_at }}</small>{% else %}—{% endif %}</td>
         </tr>
         <tr>
           <td>Check-in</td>
           <td>{{ booking.check_in_date }}</td>
-          <td>{% if provenance.check_in_date %}<small>{{ source_labels[provenance.check_in_date.source.value] }} · {{ provenance.check_in_date.recorded_at }}</small>{% else %}—{% endif %}</td>
+          <td>{% if provenance.check_in_date %}<small>{{ source_label(provenance.check_in_date.source) }} · {{ provenance.check_in_date.recorded_at }}</small>{% else %}—{% endif %}</td>
         </tr>
         <tr>
           <td>Check-out</td>
           <td>{{ booking.check_out_date }}</td>
-          <td>{% if provenance.check_out_date %}<small>{{ source_labels[provenance.check_out_date.source.value] }} · {{ provenance.check_out_date.recorded_at }}</small>{% else %}—{% endif %}</td>
+          <td>{% if provenance.check_out_date %}<small>{{ source_label(provenance.check_out_date.source) }} · {{ provenance.check_out_date.recorded_at }}</small>{% else %}—{% endif %}</td>
         </tr>
       </tbody>
     </table>
@@ -139,7 +134,7 @@
         {% set task = tasks_by_type[task_type] %}
         <tr>
           <td>
-            {{ task_labels.get(task.task_type, task.task_type.value.replace("_", " ")) }}
+            {{ task_label(task.task_type) }}
             {% if task.state.value == "failed" and task.last_error %}
             <details>
               <summary>Show error</summary>
@@ -149,11 +144,11 @@
           </td>
           <td>
             {% if group_name == "Reminders" %}
-            <span class="badge badge-{{ task.state.value }}">{{ reminder_state_labels.get(task.state.value, task.state.value.replace("_", " ")) }}</span>
+            <span class="badge badge-{{ enum_badge(task.state) }}">{{ task_state_label(task.state, reminder=true) }}</span>
             {% elif task.task_type.value == "access_code_create" and task.state.value == "complete" and access_code %}
             <span class="badge badge-complete">complete: {{ access_code }}</span>
             {% else %}
-            <span class="badge badge-{{ task.state.value }}">{{ task.state.value.replace("_", " ") }}</span>
+            <span class="badge badge-{{ enum_badge(task.state) }}">{{ task_state_label(task.state, reminder=false) }}</span>
             {% endif %}
           </td>
         </tr>
@@ -165,11 +160,12 @@
   {% endif %}
   {% endfor %}
 
-  {% if booking.status.value == 'cancelled' %}
+  {% if booking.status.value != 'active' %}
   <section class="form-block">
     <h2>Guest Contact Info</h2>
-    <p>This booking is cancelled — contact entry is disabled (it would trigger
-       the guest form, door code and cleaner-schedule automations).</p>
+    <p>This booking is {{ booking_status_label(booking.status) }} — contact
+       entry is disabled because this release cannot safely run automations
+       for a non-active or unknown booking status.</p>
   </section>
   {% else %}
   <section class="form-block">

@@ -19,9 +19,10 @@ The app publishes only on `127.0.0.1:8000`. Public traffic must arrive through
 Caddy, which reaches the app over the internal Docker network. Publishing on
 `0.0.0.0` would expose the dashboard session cookie in plaintext HTTP.
 
-`docker-entrypoint.sh` runs `alembic upgrade head` before starting uvicorn, so
-a fresh database migrates itself on first boot and a deploy carrying a new
-migration applies it automatically.
+`docker-entrypoint.sh` never migrates during app boot. It runs a read-only
+schema guard before uvicorn: exact head starts, a revision unknown to the build
+warns and starts (the expected rollback case), and a known older revision
+refuses with the pending revision ids.
 
 On startup the lifespan handler runs a credential guard: it refuses to boot if
 any required credential is missing, if `SECRET_KEY` is still the placeholder,
@@ -36,11 +37,15 @@ extra site-config directory. Neither is needed for a single-tenant deployment.
 ### Deploying a change
 
 ```bash
-docker compose up -d --build app
+docker compose build app
+docker compose run --rm --no-deps app migrate
+docker compose up -d --no-deps --no-build app
 ```
 
-App-only by choice: recreating `caddy` briefly drops TLS for everything on the
-host, and no app change requires it.
+The idempotent migration command always runs from the new image before its app
+process starts. App-only by choice: recreating `caddy` briefly drops TLS for
+everything on the host, and no app change requires it. A code rollback does
+not run migrations or restore a dump; the database stays untouched.
 
 ### Editing `config.yaml` on a running stack
 
@@ -253,21 +258,26 @@ with no vendor-specific steps.
    - `config.yaml`
    - the `backup_*.sql` and `pdfs_*.tar.gz` files from step 1
 
-3. **On the new host:** install Docker and Docker Compose, then start the stack.
+3. **On the new host:** install Docker and Docker Compose, initialize
+   PostgreSQL, and build the app image.
 
    ```bash
-   docker compose up -d
+   docker compose up -d db
+   docker compose build app
    ```
-
-   The `app` service refuses to start if any required credential is missing and
-   names the missing field. Resolve credential gaps before proceeding.
 
 4. **On the new host:** restore the database and the PDF volume.
 
    ```bash
    source .env && bash scripts/restore.sh backup_YYYYMMDD_HHMMSS.sql
-   docker compose exec -T app tar xzf - -C /app/data < pdfs_YYYYMMDD_HHMMSS.tar.gz
+   docker compose run -T --rm --no-deps app \
+     tar xzf - -C /app/data < pdfs_YYYYMMDD_HHMMSS.tar.gz
+   docker compose run --rm --no-deps app migrate
+   docker compose up -d
    ```
+
+   The `app` service refuses to start if any required credential is missing and
+   names the missing field. Resolve credential gaps before proceeding.
 
 5. **Verify:**
 

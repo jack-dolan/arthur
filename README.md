@@ -227,21 +227,32 @@ live alert caught it in production.
 
 ## Deployment
 
-`docker compose up` on any Linux host with Docker brings up three services:
+The Compose stack on any Linux host with Docker has three services:
 
 - `app`, FastAPI and APScheduler, published on loopback only
 - `db`, PostgreSQL 17 on a named volume
 - `caddy`, TLS termination and reverse proxy
 
-The entrypoint runs `alembic upgrade head` before uvicorn, so a fresh database
-migrates itself and a deploy carrying a new migration applies it on start. A
-credential guard then runs during startup and refuses to boot on a missing
-credential, a placeholder `SECRET_KEY`, or an unconfigured `DATABASE_URL`,
-naming the offending field in the error.
+Migrations are explicit, never an app-boot side effect:
+
+```bash
+docker compose up -d db
+docker compose build app
+docker compose run --rm --no-deps app migrate
+docker compose up -d
+```
+
+The migration command is idempotent and runs before every deploy. App boot
+instead runs a read-only schema guard: exact head starts; a newer revision
+unknown to an older rollback image warns and starts; a known older revision
+refuses and names the migrations the deploy skipped. The lifespan credential
+guard then refuses to boot on a missing credential, a placeholder
+`SECRET_KEY`, or an unconfigured `DATABASE_URL`, naming the offending field.
 
 Moving to a new host is `pg_dump`, copy the repo plus `.env`, `config.yaml` and
-the backup files, `docker compose up`, restore. Nothing in the stack is
-vendor-specific, which was a requirement from the start.
+the backup files, start PostgreSQL, restore, run the explicit migration
+command, then start the app and proxy. Nothing in the stack is vendor-specific,
+which was a requirement from the start.
 
 Every alert the app sends travels through its own Gmail token, so it can't
 report its own death. The outer layer of monitoring is therefore external:
@@ -286,7 +297,10 @@ Elsewhere in the repo:
 cp .env.template .env                # fill in credentials
 cp config.example.yaml config.yaml   # fill in property settings
 make setup                           # install the git hooks
-docker compose up
+docker compose up -d db              # initialize PostgreSQL
+docker compose build app
+docker compose run --rm --no-deps app migrate
+docker compose up -d
 ```
 
 The dashboard is at `https://localhost` (Caddy serves an internal certificate

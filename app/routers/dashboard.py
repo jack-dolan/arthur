@@ -8,6 +8,7 @@ Provides a Google-login-protected owner dashboard (see app/routers/auth.py) with
 from __future__ import annotations
 
 import asyncio
+import enum
 import logging
 import re
 import uuid
@@ -28,8 +29,10 @@ from app.db.models import (
     BookingTask,
     DataPoint,
     DataPointSource,
+    Platform,
     TaskState,
     TaskType,
+    UnknownEnumValue,
 )
 from app.db.session import get_db
 from app.ingestion.cancellation import delete_seam_access_code
@@ -123,9 +126,62 @@ REMINDER_STATE_LABELS: dict[str, str] = {
     TaskState.FAILED.value: "failed",
 }
 
+SOURCE_LABELS: dict[str, str] = {
+    DataPointSource.EMAIL_PARSE.value: "email parse",
+    DataPointSource.MANUAL_ENTRY.value: "manual entry",
+    DataPointSource.WEB_SCRAPE.value: "web scrape",
+    DataPointSource.DOCUSIGN_WEBHOOK.value: "DocuSign webhook",
+    DataPointSource.SEAM_API.value: "Seam API",
+    DataPointSource.SYSTEM_DEFAULT.value: "system default",
+}
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _readable_enum_value(value: enum.Enum | UnknownEnumValue) -> str:
+    return value.value.replace("_", " ")
+
+
+def _platform_label(value: Platform | UnknownEnumValue) -> str:
+    if isinstance(value, Platform):
+        return value.value
+    return f"unknown ({_readable_enum_value(value)})"
+
+
+def _booking_status_label(value: BookingStatus | UnknownEnumValue) -> str:
+    if isinstance(value, BookingStatus):
+        return value.value.replace("_", " ")
+    return f"unknown ({_readable_enum_value(value)})"
+
+
+def _task_label(value: TaskType | UnknownEnumValue) -> str:
+    if isinstance(value, TaskType):
+        return TASK_LABELS[value]
+    return f"Unknown task type ({_readable_enum_value(value)})"
+
+
+def _task_state_label(
+    value: TaskState | UnknownEnumValue,
+    *,
+    reminder: bool,
+) -> str:
+    if not isinstance(value, TaskState):
+        return f"unknown ({_readable_enum_value(value)})"
+    if reminder:
+        return REMINDER_STATE_LABELS[value.value]
+    return value.value.replace("_", " ")
+
+
+def _enum_badge(value: enum.Enum | UnknownEnumValue) -> str:
+    return "unknown" if isinstance(value, UnknownEnumValue) else value.value
+
+
+def _source_label(value: DataPointSource | UnknownEnumValue) -> str:
+    if isinstance(value, DataPointSource):
+        return SOURCE_LABELS[value.value]
+    return f"unknown ({_readable_enum_value(value)})"
 
 
 def _validate_phone(raw: str) -> str | None:
@@ -362,13 +418,25 @@ def _hoa_pipeline(
 def _detail_context(booking: Booking) -> dict[str, object]:
     """Shared template context for the booking detail page."""
     tasks_by_type = {t.task_type: t for t in booking.tasks}
+    task_groups = dict(TASK_GROUPS)
+    unknown_task_types = [
+        task.task_type
+        for task in booking.tasks
+        if isinstance(task.task_type, UnknownEnumValue)
+    ]
+    if unknown_task_types:
+        task_groups["Unknown tasks"] = unknown_task_types
     return {
         "booking": booking,
         "provenance": _build_provenance_map(booking),
-        "task_groups": TASK_GROUPS,
+        "task_groups": task_groups,
         "tasks_by_type": tasks_by_type,
-        "task_labels": TASK_LABELS,
-        "reminder_state_labels": REMINDER_STATE_LABELS,
+        "platform_label": _platform_label,
+        "booking_status_label": _booking_status_label,
+        "task_label": _task_label,
+        "task_state_label": _task_state_label,
+        "enum_badge": _enum_badge,
+        "source_label": _source_label,
         "summary": _summarize_tasks(booking),
         "hoa_pipeline": _hoa_pipeline(booking, tasks_by_type),
         "access_code": _latest_access_code(booking),
@@ -414,7 +482,13 @@ async def booking_list(
     # summary, and async SQLAlchemy cannot lazy-load it mid-render.
     active_result = await db.execute(
         select(Booking)
-        .where(Booking.status == BookingStatus.ACTIVE)
+        # A future release may add a booking status. An older rollback build
+        # must keep that row visible rather than silently omitting it.
+        .where(
+            Booking.status.not_in(
+                (BookingStatus.CANCELLED, BookingStatus.COMPLETED)
+            )
+        )
         .options(selectinload(Booking.tasks))
         .order_by(Booking.check_in_date.asc())
     )
@@ -451,6 +525,9 @@ async def booking_list(
             "cancelled_bookings": cancelled,
             "completed_bookings": completed,
             "task_summaries": {b.id: _summarize_tasks(b) for b in active},
+            "platform_label": _platform_label,
+            "booking_status_label": _booking_status_label,
+            "enum_badge": _enum_badge,
             "today": today,
         },
     )
@@ -507,12 +584,15 @@ async def save_contact(
     # dispatch real side effects (envelope, door code, cleaner row) for a stay
     # that isn't happening. The template hides the form; this guards direct
     # POSTs and the stale-tab race (cancellation lands while the form is open).
-    if booking.status == BookingStatus.CANCELLED:
+    if booking.status != BookingStatus.ACTIVE:
         log.warning(
-            "Dashboard: refusing contact save for cancelled booking %s", booking_id
+            "Dashboard: refusing contact save for non-active booking %s (%s)",
+            booking_id,
+            booking.status.value,
         )
         raise HTTPException(
-            status_code=409, detail="Booking is cancelled — contact entry is disabled"
+            status_code=409,
+            detail="Booking is not active — contact entry is disabled",
         )
 
     await db.refresh(booking, attribute_names=["tasks", "data_points"])

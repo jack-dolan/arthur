@@ -16,7 +16,9 @@ the reason for the rest.
 New-task-type checklist:
 - [ ] Enum value in TaskType (app/db/models.py) — DB enum needs an Alembic
       migration (ALTER TYPE ... ADD VALUE runs in an autocommit block; see
-      migration 0005 for the pattern)
+      migration 0005 for the pattern). The migration is additive, but the
+      compatibility review is still semantic: the previous release must
+      tolerate rows containing the new value.
 - [ ] Created in _initial_tasks (app/ingestion/poller.py) with the right
       initial state, or created on demand at its trigger point
 - [ ] TASK_LABELS entry (app/routers/dashboard.py) — a test enforces full
@@ -31,7 +33,30 @@ New-task-type checklist:
 - [ ] Cancellation behavior: should _apply_cancellation SKIP it when
       unstarted? (Default yes for automations)
 - [ ] New dashboard status value? .badge-<status> CSS rule (a test enforces)
+- [ ] Rollback read test: persist the new enum value, read it with the previous
+      release's enum/model shape, and prove it renders through the unknown
+      label/badge path without dispatching or mutating it
 ```
+
+## Database compatibility for workflow changes
+
+Task types and task states are PostgreSQL enums. `ALTER TYPE ... ADD VALUE`
+does not remove or rename anything, but it can still break N-1: SQLAlchemy's
+normal Python-side enum lookup raises when older code reads the new value.
+The models use tolerant enum deserialization so an older release receives an
+`UnknownEnumValue`; keep that boundary on every enum-backed column.
+
+Unknown workflow values are read-only to the old release. They must remain
+visible as `unknown` in the dashboard, use the fallback badge, stay out of
+known handler/automation groups, and never trigger an external side effect.
+New code still adds the normal human `TASK_LABELS` entry and group/handler
+registration. The fallback exists for rollback, not as a substitute for
+finishing the new release's UI.
+
+All workflow migrations follow the database-migration section in `CLAUDE.md`:
+N-1 compatibility, explicit deploy-time migration, immutable applied history,
+expand/contract for breaking changes, and the documented offline-render skip
+marker only when a revision genuinely cannot render.
 
 ## Invariants that must hold for every handler
 

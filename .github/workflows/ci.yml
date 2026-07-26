@@ -14,6 +14,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  migrations-lint:
+    name: migrations-lint
+    runs-on: ubuntu-latest
+
+    # Forward-only policy: revisions already on main are an immutable,
+    # explicitly exempt baseline. Every newly added revision is rendered in
+    # Alembic's offline mode and checked with all Squawk default rules.
+    # Editing, deleting, or renaming an existing revision fails first.
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.8"
+          enable-cache: true
+
+      - name: Install Python and dependencies
+        run: uv sync --extra dev --python 3.12
+
+      - name: Install Squawk 2.61.0 (pinned, checksum-verified)
+        run: |
+          curl -sSfL -o /tmp/squawk \
+            https://github.com/sbdchd/squawk/releases/download/v2.61.0/squawk-linux-x64
+          echo "35e0f95573f0fb59fe6b68bcb84a0b1d3bd0937d84c51432b3978bd61e23b645  /tmp/squawk" \
+            | sha256sum -c -
+          chmod +x /tmp/squawk
+          /tmp/squawk --version
+
+      - name: Render and lint new migrations
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          base="$EVENT_BASE_SHA"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="$(git rev-parse HEAD^)"
+          fi
+          uv run python .github/scripts/lint_migrations.py \
+            --base "$base" \
+            --head "$GITHUB_SHA" \
+            --squawk /tmp/squawk
+
   tests:
     name: tests
     runs-on: ubuntu-latest

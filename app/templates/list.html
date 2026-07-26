@@ -24,11 +24,14 @@
         {% set summary = task_summaries[b.id] %}
         <tr>
           <td><a href="/bookings/{{ b.id }}">{{ b.guest_first_name }} {{ b.guest_last_name }}</a></td>
-          <td><span class="badge badge-platform">{{ b.platform.value }}</span></td>
+          <td><span class="badge badge-{{ enum_badge(b.platform) }}">{{ platform_label(b.platform) }}</span></td>
           <td class="nowrap">{{ b.check_in_date }}</td>
           <td class="nowrap">{{ b.check_out_date }}</td>
           <td class="num">{{ (b.check_in_date - today).days }}</td>
           <td>
+            {% if enum_badge(b.status) == "unknown" %}
+            <span class="badge badge-unknown">{{ booking_status_label(b.status) }}</span>
+            {% endif %}
             <span class="badge badge-{{ summary.status }}">{{ summary.status.replace("_", " ") }}</span>
           </td>
           <td class="nowrap">
@@ -66,7 +69,7 @@
         {% for b in cancelled_bookings %}
         <tr>
           <td><a href="/bookings/{{ b.id }}">{{ b.guest_first_name }} {{ b.guest_last_name }}</a></td>
-          <td><span class="badge badge-platform">{{ b.platform.value }}</span></td>
+          <td><span class="badge badge-{{ enum_badge(b.platform) }}">{{ platform_label(b.platform) }}</span></td>
           <td class="nowrap">{{ b.check_in_date }}</td>
           <td class="nowrap">{{ b.check_out_date }}</td>
           <td class="nowrap">{{ b.updated_at.strftime("%Y-%m-%d %H:%M") }}</td>
@@ -97,7 +100,7 @@
         {% for b in completed_bookings %}
         <tr>
           <td><a href="/bookings/{{ b.id }}">{{ b.guest_first_name }} {{ b.guest_last_name }}</a></td>
-          <td><span class="badge badge-platform">{{ b.platform.value }}</span></td>
+          <td><span class="badge badge-{{ enum_badge(b.platform) }}">{{ platform_label(b.platform) }}</span></td>
           <td class="nowrap">{{ b.check_in_date }}</td>
           <td class="nowrap">{{ b.check_out_date }}</td>
         </tr>

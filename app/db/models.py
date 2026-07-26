@@ -31,6 +31,53 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
 
+class UnknownEnumValue(str):
+    """A database enum value introduced by a newer application release.
+
+    SQLAlchemy normally raises ``LookupError`` while materializing a row whose
+    PostgreSQL enum value is absent from the Python enum bundled in this build.
+    Returning a string-like sentinel keeps rollback reads alive while making
+    the semantic gap explicit to callers and templates.
+    """
+
+    @property
+    def value(self) -> str:
+        return str(self)
+
+
+class _TolerantEnumResult:
+    def _object_value_for_elem(self, elem):  # noqa: ANN001
+        try:
+            return super()._object_value_for_elem(elem)
+        except LookupError:
+            return UnknownEnumValue(elem)
+
+
+_TOLERANT_DIALECT_TYPES: dict[type, type] = {}
+
+
+class TolerantSAEnum(_TolerantEnumResult, SAEnum):
+    """SQLAlchemy Enum that preserves unknown database values as sentinels."""
+
+    def adapt(self, cls, **kw):  # noqa: ANN001, ANN003
+        # PostgreSQL replaces sqlalchemy.Enum with a driver-specific ENUM
+        # implementation. Preserve the tolerant result conversion in that
+        # adapted class as well; otherwise the generic override never runs.
+        # The generic/default dialect adapts the type to its own class; that
+        # class is already tolerant and must not receive the mixin twice.
+        if issubclass(cls, _TolerantEnumResult):
+            return super().adapt(cls, **kw)
+        tolerant_cls = _TOLERANT_DIALECT_TYPES.get(cls)
+        if tolerant_cls is None:
+            tolerant_cls = type(
+                f"Tolerant{cls.__name__}",
+                (_TolerantEnumResult, cls),
+                {},
+            )
+            _TOLERANT_DIALECT_TYPES[cls] = tolerant_cls
+        return super().adapt(tolerant_cls, **kw)
+
+
 class Platform(str, enum.Enum):
     AIRBNB = "airbnb"
     VRBO = "vrbo"
@@ -76,15 +123,19 @@ class DataPointSource(str, enum.Enum):
     SYSTEM_DEFAULT = "system_default"
 
 
-_platform_enum = SAEnum(Platform, name="platform", values_callable=lambda e: [m.value for m in e])
-_status_enum = SAEnum(
+_platform_enum = TolerantSAEnum(
+    Platform, name="platform", values_callable=lambda e: [m.value for m in e]
+)
+_status_enum = TolerantSAEnum(
     BookingStatus, name="booking_status", values_callable=lambda e: [m.value for m in e]
 )
-_task_type_enum = SAEnum(TaskType, name="task_type", values_callable=lambda e: [m.value for m in e])
-_task_state_enum = SAEnum(
+_task_type_enum = TolerantSAEnum(
+    TaskType, name="task_type", values_callable=lambda e: [m.value for m in e]
+)
+_task_state_enum = TolerantSAEnum(
     TaskState, name="task_state", values_callable=lambda e: [m.value for m in e]
 )
-_data_point_source_enum = SAEnum(
+_data_point_source_enum = TolerantSAEnum(
     DataPointSource, name="data_point_source", values_callable=lambda e: [m.value for m in e]
 )
 

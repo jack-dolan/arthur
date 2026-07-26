@@ -64,6 +64,81 @@ is `git commit --no-verify`.
 ### Keep the docs honest
 If implementation reveals something that contradicts `CONTEXT.md` or an ADR, update the doc before moving on. The docs are the source of truth for domain decisions; the code is the source of truth for implementation.
 
+### Database migrations
+
+Every migration must be **N-1 compatible**: after the new schema is applied,
+the immediately previous release's code must still read and write it safely.
+Redeploying the previous image is the whole rollback; the database is never
+restored as part of a code rollback because that would discard newer writes.
+Applied migrations are immutable, and the rule binds to new migrations only.
+
+Migrations never run at application boot. Boot runs a read-only schema guard:
+an exact head starts, a revision unknown to the build warns and starts (the
+database is ahead after rollback), and a known older revision refuses to start.
+Deployments explicitly run the image's idempotent `migrate` command before
+starting its app process.
+
+Breaking changes use expand/contract across releases:
+
+- Rename: add the new column, dual-write, backfill, switch reads, then drop the
+  old column releases later.
+- Drop: ship code that no longer references the object first; drop it in a
+  later release.
+- `NOT NULL`: add nullable, backfill, add a `CHECK ... NOT VALID`, then
+  `VALIDATE CONSTRAINT` separately so validation does not hold the original
+  long-lived lock. Only tighten the column after old code no longer writes
+  nulls.
+- Type change: add a shadow column and move writes, data and reads in stages.
+
+PostgreSQL enum additions have a semantic compatibility trap: new code can
+write a value the old Python enum does not understand. Every enum-backed model
+must use tolerant deserialization, and every dashboard read path must show an
+unknown label/badge instead of raising. Adding a task type still requires a
+`TASK_LABELS` entry for the new release. After rollback, rows only the newer
+code understands semantically render as `unknown` under the old code. That
+visible loss of meaning is acceptable; a crash or unsafe write is not.
+Rollback validity is therefore about semantics as well as schema shape.
+
+CI renders each new revision with Alembic offline mode and runs pinned Squawk
+defaults over the SQL. A revision that genuinely cannot render offline (for
+example, a Python data backfill) must carry this exact one-line marker inside
+the revision:
+
+```python
+# migrations-lint: offline-skip - <specific one-line justification>
+```
+
+The skip is printed visibly by CI. Never add the marker merely to silence a
+Squawk finding; fix the DDL or use an explicit, reviewed Squawk suppression.
+
+### Reporting finished work
+
+A closeout report has two parts: what you did, and what is still open. Both
+parts are for a reader who has no context on the session.
+
+**Count the open items and say the number.** If there are five, write "five
+open items" and number them one to five. Do not put four items under a heading
+that says "two things". Do not introduce a new open item inside the
+explanation of a different one — if it deserves a mention, it deserves its own
+numbered entry.
+
+**Write every open item in four parts:**
+
+1. **What the problem is.** Plain language, no shorthand.
+2. **Why it matters.** The concrete consequence, and when it would actually
+   bite. If the answer is "it probably never will", say that.
+3. **How it could be fixed.** Give the options you can see, with the cost or
+   risk of each. One option is fine if there genuinely is only one.
+4. **What you recommend.** Fix it now, fix it later, or leave it alone. If
+   later, name the place you have written it down where it will be read again
+   — a future step's prompt, an issue, a checklist item. A paragraph buried in
+   a Progress Log does not count, because nobody re-reads those before working.
+
+**Style.** Short sentences. Explain the thing, then stop. No jargon, no
+clipped half-sentences, no closing flourish that restates what you just said.
+Prefer a number over an adjective: "480 MB, down from 699 MB" beats
+"significantly smaller".
+
 ## Tech stack
 
 | Layer | Choice |
@@ -99,7 +174,8 @@ If implementation reveals something that contradicts `CONTEXT.md` or an ADR, upd
 This service must be fully migratable to a new VPS. Migration procedure:
 1. `pg_dump` on old host
 2. Copy repo + `.env` + `config.yaml` to new host
-3. `pg_restore` on new host
-4. `docker compose up`
+3. Start PostgreSQL and `pg_restore` on new host
+4. Run the image's explicit `migrate` command
+5. Start the app and proxy
 
 Migration scripts live in `scripts/`. Keep them up to date.
