@@ -178,6 +178,17 @@ def _enum_badge(value: enum.Enum | UnknownEnumValue) -> str:
     return "unknown" if isinstance(value, UnknownEnumValue) else value.value
 
 
+def _platform_badge(value: Platform | UnknownEnumValue) -> str:
+    """Badge class for the platform pill.
+
+    Deliberately NOT _enum_badge: task states have a `.badge-<value>` rule per
+    state, but every platform shares the single `.badge-platform` rule. Feeding
+    the raw value here emits `.badge-airbnb`, which the stylesheet does not
+    define, and the pill silently degrades to unstyled text.
+    """
+    return "unknown" if isinstance(value, UnknownEnumValue) else "platform"
+
+
 def _source_label(value: DataPointSource | UnknownEnumValue) -> str:
     if isinstance(value, DataPointSource):
         return SOURCE_LABELS[value.value]
@@ -436,6 +447,7 @@ def _detail_context(booking: Booking) -> dict[str, object]:
         "task_label": _task_label,
         "task_state_label": _task_state_label,
         "enum_badge": _enum_badge,
+        "platform_badge": _platform_badge,
         "source_label": _source_label,
         "summary": _summarize_tasks(booking),
         "hoa_pipeline": _hoa_pipeline(booking, tasks_by_type),
@@ -528,6 +540,7 @@ async def booking_list(
             "platform_label": _platform_label,
             "booking_status_label": _booking_status_label,
             "enum_badge": _enum_badge,
+            "platform_badge": _platform_badge,
             "today": today,
         },
     )

@@ -100,7 +100,25 @@ visible loss of meaning is acceptable; a crash or unsafe write is not.
 Rollback validity is therefore about semantics as well as schema shape.
 
 CI renders each new revision with Alembic offline mode and runs pinned Squawk
-defaults over the SQL. A revision that genuinely cannot render offline (for
+over the SQL. Squawk's defaults apply, with one exclusion recorded and
+explained in `.squawk.toml`.
+
+**Every new revision starts by setting both timeouts.** Squawk requires them,
+and they are what stops a migration from queueing behind a long transaction and
+blocking every reader on the table:
+
+```python
+def upgrade() -> None:
+    op.execute("SET lock_timeout = '5s'")
+    op.execute("SET statement_timeout = '1min'")
+    ...
+```
+
+Raise either value for a revision that legitimately needs longer, and say why
+in a comment. Without them the job fails on `require-lock-timeout` and
+`require-statement-timeout`, which is the expected result, not a false alarm.
+
+A revision that genuinely cannot render offline (for
 example, a Python data backfill) must carry this exact one-line marker inside
 the revision:
 
@@ -109,7 +127,8 @@ the revision:
 ```
 
 The skip is printed visibly by CI. Never add the marker merely to silence a
-Squawk finding; fix the DDL or use an explicit, reviewed Squawk suppression.
+Squawk finding; fix the DDL, or add a reviewed exclusion to `.squawk.toml` with
+its reasoning written next to it.
 
 ### Reporting finished work
 

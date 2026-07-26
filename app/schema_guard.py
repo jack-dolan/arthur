@@ -25,8 +25,9 @@ log = logging.getLogger("app.schema_guard")
 
 
 class SchemaAction(enum.Enum):
+    # Only START is representable: the behind case raises SchemaBehindError
+    # rather than returning, so a caller cannot accidentally ignore it.
     START = "start"
-    REFUSE = "refuse"
 
 
 @dataclass(frozen=True)

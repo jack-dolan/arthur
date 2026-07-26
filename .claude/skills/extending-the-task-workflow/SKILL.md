@@ -19,6 +19,9 @@ New-task-type checklist:
       migration 0005 for the pattern). The migration is additive, but the
       compatibility review is still semantic: the previous release must
       tolerate rows containing the new value.
+- [ ] The revision opens with the two timeout statements every new revision
+      needs (`SET lock_timeout` / `SET statement_timeout`; see CLAUDE.md's
+      Database migrations section). CI's migration lint fails without them.
 - [ ] Created in _initial_tasks (app/ingestion/poller.py) with the right
       initial state, or created on demand at its trigger point
 - [ ] TASK_LABELS entry (app/routers/dashboard.py) — a test enforces full

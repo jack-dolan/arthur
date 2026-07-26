@@ -4,7 +4,7 @@
   <a href="/">&#8592; Back to bookings</a>
 
   <h1>{{ booking.guest_first_name }} {{ booking.guest_last_name }}
-    <span class="badge badge-{{ enum_badge(booking.platform) }}">{{ platform_label(booking.platform) }}</span>
+    <span class="badge badge-{{ platform_badge(booking.platform) }}">{{ platform_label(booking.platform) }}</span>
     {% if enum_badge(booking.status) == "unknown" %}
     <span class="badge badge-unknown">{{ booking_status_label(booking.status) }}</span>
     {% endif %}

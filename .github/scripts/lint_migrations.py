@@ -18,6 +18,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+CONFIG_PATH = Path(__file__).resolve().parents[2] / ".squawk.toml"
+
 SKIP_MARKER = re.compile(
     r"^# migrations-lint: offline-skip - (?P<justification>\S.*)$",
     re.MULTILINE,
@@ -156,11 +158,16 @@ def lint_revision(revision: Revision, squawk: Path) -> int:
             return render.returncode
 
         with sql_path.open() as sql_file:
+            # Squawk would discover .squawk.toml from the working directory
+            # anyway; passing it explicitly keeps the single documented
+            # exclusion visible and makes the job independent of the cwd.
+            config = ["--config", str(CONFIG_PATH)] if CONFIG_PATH.exists() else []
             # S603: the executable is the pinned, checksum-verified workflow
             # input; argv is fixed and no shell is involved.
             lint = subprocess.run(  # noqa: S603
                 [
                     str(squawk),
+                    *config,
                     "--pg-version=17.0",
                     "--stdin-filepath",
                     str(revision.path.with_suffix(".sql")),

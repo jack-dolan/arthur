@@ -1,0 +1,18 @@
+# Squawk configuration for the [migrations-lint] CI job.
+#
+# ONE exclusion, and it is a schema-convention decision, not a safety waiver:
+#
+# prefer-text-field asks for `TEXT` plus a `CHECK` constraint instead of a
+# bounded `VARCHAR(n)`. Its real concern is that CHANGING a varchar's size takes
+# an ACCESS EXCLUSIVE lock; adding a new bounded column does not. Every existing
+# column in this schema is a bounded VARCHAR, so honouring the rule would apply
+# only to new columns and leave the schema split between two conventions for no
+# safety gain. Widening an existing varchar is still caught: that is
+# `changing-column-type`, which stays on.
+#
+# Everything else runs at Squawk's defaults. Do not add entries here to silence
+# a finding about a specific migration: fix the DDL. An exclusion belongs here
+# only when the rule is wrong for this schema in general, with the reasoning
+# written above it. The offline-skip marker in CLAUDE.md is NOT an alternative
+# -- it is only for a revision that cannot be rendered offline at all.
+excluded_rules = ["prefer-text-field"]

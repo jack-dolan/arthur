@@ -786,6 +786,24 @@ def test_summarize_tasks_statuses_all_have_badge_css():
         assert _summarize_tasks(b)["status"] in BOOKING_STATUSES
 
 
+def test_every_rendered_badge_class_exists_in_the_stylesheet():
+    """The templates build badge classes from helper output, so a helper that
+    returns an unstyled value degrades the badge to bare text with no test
+    failure anywhere. Enumerate what the helpers can emit and require a rule."""
+    from pathlib import Path
+
+    from app.db.models import Platform
+    from app.routers.dashboard import _enum_badge, _platform_badge
+
+    css = (Path(__file__).parents[2] / "app" / "static" / "style.css").read_text()
+
+    emitted = {_platform_badge(p) for p in Platform}
+    emitted |= {_enum_badge(s) for s in TaskState}
+    emitted.add("unknown")
+    for badge in emitted:
+        assert f".badge-{badge}" in css, f"style.css missing .badge-{badge}"
+
+
 # ---------------------------------------------------------------------------
 # HOA pipeline (detail-page panel)
 # ---------------------------------------------------------------------------
@@ -905,6 +923,21 @@ def test_task_labels_cover_every_task_type():
     from app.routers.dashboard import TASK_LABELS
 
     assert set(TASK_LABELS) == set(TaskType)
+
+
+def test_reminder_state_labels_cover_every_task_state():
+    """_task_state_label indexes this dict directly — a missing entry is a 500."""
+    from app.routers.dashboard import REMINDER_STATE_LABELS
+
+    assert set(REMINDER_STATE_LABELS) == {s.value for s in TaskState}
+
+
+def test_source_labels_cover_every_data_point_source():
+    """_source_label indexes this dict directly — a missing entry is a 500."""
+    from app.db.models import DataPointSource
+    from app.routers.dashboard import SOURCE_LABELS
+
+    assert set(SOURCE_LABELS) == {s.value for s in DataPointSource}
 
 
 # ---------------------------------------------------------------------------

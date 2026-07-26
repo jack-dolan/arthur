@@ -121,6 +121,36 @@ async def test_list_returns_html_with_auth():
     assert "text/html" in response.headers["content-type"]
 
 
+async def test_list_renders_the_styled_platform_badge_class():
+    """The platform pill's class is built from a helper, so a helper returning
+    the raw enum value silently strips its styling. Assert the class the
+    stylesheet actually defines reaches the rendered page."""
+    booking = _make_booking(guest_phone="5551234567", guest_email="g@example.com")
+
+    active_result = MagicMock()
+    active_result.scalars.return_value.all.return_value = [booking]
+    empty_result = MagicMock()
+    empty_result.scalars.return_value.all.return_value = []
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(
+        side_effect=[active_result, empty_result, empty_result]
+    )
+    override = await _override_get_db_factory(mock_session)
+
+    try:
+        _auth_override()
+        app.dependency_overrides[get_db] = override
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "badge badge-platform" in response.text
+    assert f"badge-{booking.platform.value}" not in response.text
+
+
 async def test_list_shows_recently_completed_bookings():
     """F15: a COMPLETED booking must still be visible somewhere on the
     dashboard (it's in neither the active nor the cancelled query) — mirrors
