@@ -86,6 +86,17 @@ DOC_V4_NETS = [
     ipaddress.ip_network("198.51.100.0/24"),  # RFC 5737 TEST-NET-2
     ipaddress.ip_network("203.0.113.0/24"),  # RFC 5737 TEST-NET-3
 ]
+# RFC 1918 private ranges are exempt, mirroring the publish-time gate (which
+# gained this exemption 2026-08-03, commit 79fc0de): they route nowhere on the
+# internet and every network on earth reuses them, so one in a file discloses
+# nothing reachable. Deliberately NOT `IPv4Address.is_private`, which also
+# covers 100.64/10 (the carrier-grade NAT range a tailnet allocates from) --
+# a tailnet address IS a real identifier here and must keep tripping this scan.
+PRIVATE_V4_NETS = [
+    ipaddress.ip_network("10.0.0.0/8"),  # RFC 1918 24-bit block
+    ipaddress.ip_network("172.16.0.0/12"),  # RFC 1918 20-bit block
+    ipaddress.ip_network("192.168.0.0/16"),  # RFC 1918 16-bit block
+]
 DOC_V6_NET = ipaddress.ip_network("2001:db8::/32")  # RFC 3849
 VERSIONISH = re.compile(r"(?i)\bversion|\brelease\b|__version__|>=|==|~=")
 
@@ -113,6 +124,8 @@ def keep_ipv4(match: str, line: str) -> bool:
     if str(addr) == "255.255.255.255":
         return False
     if any(addr in net for net in DOC_V4_NETS):
+        return False
+    if any(addr in net for net in PRIVATE_V4_NETS):
         return False
     octets = [int(o) for o in match.split(".")]
     if all(o < 100 for o in octets) and VERSIONISH.search(line):
