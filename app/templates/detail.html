@@ -106,7 +106,13 @@
             <span class="badge badge-waiting_on_guest">window open &mdash; waiting on the signed form</span>
             {% endif %}
             {% else %}
-            <span class="badge badge-failed">window passed &mdash; will not auto-send; handle manually</span>
+            {# The window's late edge is a scheduling deadline, not a send-blocker:
+               both send paths send anyway (owner adjudication 2026-07-22). #}
+            {% if hoa_pipeline.signed %}
+            <span class="badge badge-scheduled">window passed &mdash; sending late, within the hour</span>
+            {% else %}
+            <span class="badge badge-waiting_on_guest">window passed &mdash; sends late once the form is signed</span>
+            {% endif %}
             {% endif %}
           </td>
         </tr>

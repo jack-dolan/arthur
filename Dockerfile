@@ -22,19 +22,24 @@
 #    image no later layer can remove them. Keeping uv in the builder and
 #    copying only the finished virtualenv drops both.
 
-# --- builder: uv + the locked dependency set, into /opt/venv -----------------
-FROM python:3.12-slim AS builder
+# --- uv, as a pinned stage so an updater can see the pin ---------------------
+# Declaring uv as a `FROM` is what makes the version watchable: Dependabot and
+# friends parse `FROM` lines and nothing else, so the `pip install uv==` form
+# this replaced received no automated updates at all.
+#
+# The cost is that the build now needs to reach ghcr.io. That is a real
+# failure mode rather than a theoretical one -- a host holding a stale
+# credential for a registry sends it on every request and gets `denied` even
+# for a public image, instead of falling back to anonymous -- so it was
+# avoided until both build hosts were verified able to pull anonymously
+# (2026-07-28). Builds now happen on GitHub's runners in any case; the VPS
+# path was the one that broke.
+FROM ghcr.io/astral-sh/uv:0.12.2 AS uv
 
-# uv is pinned (an unpinned installer is the same class of problem as unpinned
-# dependencies) and installed from PyPI rather than copied from a registry
-# image. `COPY --from=ghcr.io/astral-sh/uv:<tag>` reads better and was tried
-# first, but it makes every build depend on registry auth: a host with a stale
-# credential for that registry has it sent on every request and gets `denied`
-# even for a public image, rather than falling back to anonymous. A build that
-# can fail on someone else's expired token is not worth the tidier syntax.
-# Trade-off accepted knowingly: this pin is not watched by any automated
-# updater (they read `FROM` lines), so bump it by hand when uv matters.
-RUN pip install --no-cache-dir uv==0.11.8
+# --- builder: uv + the locked dependency set, into /opt/venv -----------------
+FROM python:3.14-slim AS builder
+
+COPY --from=uv /uv /usr/local/bin/uv
 
 WORKDIR /src
 
@@ -54,7 +59,53 @@ RUN uv venv /opt/venv \
       --requirement /opt/venv/requirements.lock.txt
 
 # --- final: clean base + the virtualenv, nothing else ------------------------
-FROM python:3.12-slim
+FROM python:3.14-slim
+
+# Take every Debian security fix available at build time.
+#
+# The base image tag lags its own security archive. On 2026-08-26 the tag still
+# shipped openssl 3.5.6 while the archive already had 3.5.7-1~deb13u2 with the
+# fix for CVE-2026-14456, and the build gate blocked the deploy on it -- the
+# gate blocks only findings that HAVE a fix, so "wait for the base image to be
+# rebuilt" is the one response that leaves red on the board indefinitely.
+#
+# Blanket `upgrade` rather than naming packages, because naming them means the
+# next lagging package is another blocked deploy and another one-line commit.
+# This does not make builds less reproducible than they already are: the base is
+# the floating `python:3.14-slim` tag rather than a digest, so what lands here
+# already depends on the day. The Python side is unaffected -- that comes from
+# uv.lock, and the lockfile gate in the build workflow checks it separately.
+#
+# If a Debian upgrade ever breaks the image, the two smoke tests in the same
+# workflow fail before anything is published.
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get upgrade -y \
+ && rm -rf /var/lib/apt/lists/*
+
+# The base image's own pip is removed, and this is a security fix rather than a
+# size one.
+#
+# pip vendors private copies of its dependencies under `pip/_vendor/`. Those
+# copies carry their own advisories, and pip 26.2.1 is the first version in
+# these images to ship `pip/_vendor/bom.cdx.json` -- a CycloneDX SBOM that
+# names every vendored package and version. Trivy reads that SBOM, so the
+# vendored set became visible to the scanner for the first time and the build
+# gate began failing on msgpack 1.1.2 (GHSA-6v7p-g79w-8964) and setuptools
+# 70.3.0 (CVE-2025-47273).
+#
+# Neither is reachable at runtime. Nothing in docker-entrypoint.sh invokes pip:
+# `alembic`, `uvicorn` and `python` all resolve to /opt/venv, which uv builds
+# without pip, and the venv does not expose the base interpreter's
+# site-packages. The vendored code was dead weight before it was a finding.
+#
+# NOTE for whoever bumps python:3.12-slim -> anything newer next: setuptools
+# 70.3.0 was vendored by pip 25.0.1 in the 3.12 image too. It was never absent
+# from this image, only invisible, because that pip shipped no SBOM. Deleting
+# pip is what actually removes it.
+RUN rm -rf /usr/local/lib/python*/site-packages/pip \
+           /usr/local/lib/python*/site-packages/pip-*.dist-info \
+           /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.*
 
 COPY --from=builder /opt/venv /opt/venv
 

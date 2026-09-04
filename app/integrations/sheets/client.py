@@ -35,6 +35,7 @@ import httplib2
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
+from app.preview import inert_client, is_preview_mode
 from app.settings import settings
 
 log = logging.getLogger(__name__)
@@ -48,7 +49,13 @@ HTTP_TIMEOUT_SECONDS = 30
 
 
 def get_sheets_service():
-    """Return an authenticated Google Sheets API v4 client."""
+    """Return an authenticated Google Sheets API v4 client.
+
+    In preview mode this returns an inert stub instead (app/preview.py), so a
+    preview can never write a row into the real cleaner schedule.
+    """
+    if is_preview_mode():
+        return inert_client("Google Sheets")
     creds = Credentials(
         token=None,
         refresh_token=settings.google_sheets_refresh_token,

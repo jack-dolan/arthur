@@ -26,3 +26,25 @@ Hostex (or equivalent channel manager API) remains the documented fallback if ma
 - Each booking requires a small amount of manual work (opening the platform page, copying 1–2 fields). Acceptable given the booking volume.
 - The dashboard must be built before the task integrations (Phase 3), rather than after (formerly Phase 5), because data entry is a prerequisite for DocuSign and access code creation.
 - The Claude API guest-reply parsing flow is removed entirely. Simpler system, one fewer external dependency.
+
+### Amendment, 2026-07-30 — the Claude API is a dependency again, for something else
+
+This decision removed the Claude API along with scraping, and the settings field
+for its key was deleted as dead code. The key is back. Nothing above is
+reversed: there is still no scraping, and guest replies are still not parsed by
+a model.
+
+The new use is unrelated. Booking emails are recognised by subject keywords, and
+anything unrecognised is recorded as a dead letter and ignored silently, so a
+platform rewording a confirmation subject would drop a real booking without an
+alert. A weekly job now asks Claude, one email at a time, whether any
+dead-lettered platform email looks like a booking that was missed, and emails
+the owner when it thinks so. It reads and it emails. It never writes to the
+classifier, a task, a booking, or a dead letter, so a wrong answer costs a
+minute of reading and nothing else. The keyword classifier remains the only
+thing that ingests a booking.
+
+The "one fewer external dependency" consequence above no longer holds. The
+dependency is deliberately narrow: one job, one small model, capped items and
+capped tokens per run, and the pre-existing non-AI digest still runs unchanged
+as the backstop if the reviewer stops working.

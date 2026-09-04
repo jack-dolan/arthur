@@ -20,6 +20,7 @@ import asyncio
 import base64
 import email as email_lib
 import logging
+import uuid
 from datetime import UTC, datetime
 from email import policy
 from email.message import Message
@@ -128,6 +129,7 @@ async def process_message(msg_id: str, payload: dict) -> None:
                 error=str(exc),
                 alerts_service=get_alerts_service(),
                 alerts_address=config.email.alerts,
+                alerts_to=config.email.alerts_to_header,
                 dashboard_base_url=f"https://{settings.domain}",
             )
         except Exception as alert_exc:  # noqa: BLE001 — alert must be non-fatal
@@ -297,6 +299,7 @@ async def _handle_parse_failure(
             error=str(exc),
             alerts_service=get_alerts_service(),
             alerts_address=config.email.alerts,
+            alerts_to=config.email.alerts_to_header,
             dashboard_base_url=f"https://{settings.domain}",
         )
     except Exception as alert_exc:  # noqa: BLE001 — alert failure must be non-fatal
@@ -334,6 +337,7 @@ async def _handle_alteration(msg_id: str, email_type: EmailType) -> None:
             classified_as=email_type.value,
             alerts_service=get_alerts_service(),
             alerts_address=config.email.alerts,
+            alerts_to=config.email.alerts_to_header,
             dashboard_base_url=f"https://{settings.domain}",
         )
     except Exception as alert_exc:  # noqa: BLE001 — alert failure must be non-fatal
@@ -373,6 +377,7 @@ async def _handle_cancellation_parse_failure(msg_id: str, email_type: EmailType)
             classified_as=email_type.value,
             alerts_service=get_alerts_service(),
             alerts_address=config.email.alerts,
+            alerts_to=config.email.alerts_to_header,
             dashboard_base_url=f"https://{settings.domain}",
         )
     except Exception as alert_exc:  # noqa: BLE001 — alert failure must be non-fatal
@@ -387,15 +392,32 @@ async def _handle_cancellation_parse_failure(msg_id: str, email_type: EmailType)
 # Persistence
 # ---------------------------------------------------------------------------
 
-def _initial_tasks(platform: Platform, has_phone: bool, has_email: bool) -> list[BookingTask]:
-    """Return the BookingTask rows to create alongside a new booking."""
+def _initial_tasks(
+    platform: Platform,
+    has_phone: bool,
+    has_email: bool,
+    cleaner_enabled: bool = True,
+) -> list[BookingTask]:
+    """Return the BookingTask rows to create alongside a new booking.
+
+    ``cleaner_enabled`` mirrors ``cleaner_schedule.enabled`` for the booking's
+    property. When it is false the cleaner row is created SKIPPED rather than
+    omitted: the dashboard shows a booking's whole task list, so a missing row
+    reads as a bug, while a SKIPPED one reads as a deliberate decision and
+    already counts as done in the progress metric. It also gives the daily
+    requeue job nothing to pick up. Defaults true so callers predating the flag
+    keep the old behaviour; the handler is the authoritative guard regardless.
+    """
     waiting = TaskState.WAITING
     pending = TaskState.PENDING
     skipped = TaskState.SKIPPED
 
     tasks = [
         BookingTask(task_type=TaskType.OWNER_ALERT_NEW_BOOKING, state=pending),
-        BookingTask(task_type=TaskType.CLEANER_SHEET_ADD, state=pending),
+        BookingTask(
+            task_type=TaskType.CLEANER_SHEET_ADD,
+            state=pending if cleaner_enabled else skipped,
+        ),
         BookingTask(
             task_type=TaskType.DOCUSIGN_SEND,
             state=pending if has_email else waiting,
@@ -468,9 +490,16 @@ async def persist_booking(
     # Resolve property_id: Phase 3 will add proper property matching; hardcode
     # the first (and currently only) property for now.
     from app.config import load_config
+    # cleaner_enabled defaults true here for the same reason the property_id
+    # falls back to a literal: if config cannot be read we are already degraded,
+    # and the handler re-reads config itself and refuses to write on its own
+    # account, so an optimistic guess here cannot reach the spreadsheet.
+    cleaner_enabled = True
     try:
         config = load_config()
-        property_id = config.properties[0].id
+        prop = config.properties[0]
+        property_id = prop.id
+        cleaner_enabled = prop.cleaner_schedule.enabled
     except Exception:
         property_id = "property_1"
 
@@ -487,7 +516,14 @@ async def persist_booking(
         status=BookingStatus.ACTIVE,
         source_email_message_id=msg_id,
     )
-    booking.tasks.extend(_initial_tasks(platform, has_phone=has_phone, has_email=has_email))
+    booking.tasks.extend(
+        _initial_tasks(
+            platform,
+            has_phone=has_phone,
+            has_email=has_email,
+            cleaner_enabled=cleaner_enabled,
+        )
+    )
     booking.data_points.extend(_booking_data_points(parsed))
 
     alert_task = next(
@@ -559,6 +595,7 @@ async def persist_booking(
                 booking,
                 alerts_service=get_alerts_service(),
                 alerts_address=config.email.alerts,
+                alerts_to=config.email.alerts_to_header,
                 dashboard_base_url=f"https://{settings.domain}",
             )
         except Exception as exc:
@@ -571,6 +608,46 @@ async def persist_booking(
                 alert_task.state = TaskState.COMPLETE
                 alert_task.completed_at = datetime.now(UTC)
                 await session.commit()
+
+    # Run the automations that are ready the moment the booking exists. The
+    # session above is closed first — the dispatcher opens its own.
+    await _dispatch_new_booking_tasks(booking.id)
+
+
+async def _dispatch_new_booking_tasks(booking_id: uuid.UUID) -> None:
+    """Dispatch a freshly ingested booking's ready-now automations.
+
+    CONTEXT.md's task graph says the cleaner-schedule row is added "immediately
+    on booking", and it needs nothing from the owner — only the guest name and
+    the stay dates, both of which come from the confirmation email. Nothing
+    dispatched it here until 2026-07-31, so the row was written only when the
+    owner saved a contact field on the dashboard, or up to a day later when
+    requeue_stalled_automations swept for orphaned PENDING tasks.
+
+    This dispatches whatever is PENDING, which is the point: the tasks that do
+    need a contact field are created WAITING (DOCUSIGN_SEND always, since
+    neither platform's confirmation carries the guest email; ACCESS_CODE_CREATE
+    for Airbnb, whose confirmation carries no phone), and the dispatcher skips
+    every non-PENDING row. So the phone still gates the door code and the email
+    still gates DocuSign — those gates are the task's initial state, not the
+    absence of a dispatch.
+
+    Never fatal. The booking row is already committed, so a failure here must
+    not propagate: it would abort the poll before later messages are processed.
+    Per-task failures are already isolated and recorded inside the dispatcher;
+    this catch is for a failure of the dispatch itself. Either way the daily
+    requeue_stalled_automations job retries.
+    """
+    from app.tasks.dispatch import _dispatch_pending_tasks
+
+    try:
+        await _dispatch_pending_tasks(booking_id)
+    except Exception:
+        log.exception(
+            "Initial dispatch failed for new booking %s; leaving its PENDING "
+            "tasks for the daily requeue sweep",
+            booking_id,
+        )
 
 
 # ---------------------------------------------------------------------------

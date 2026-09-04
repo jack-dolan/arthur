@@ -204,5 +204,9 @@ def _block_live_external_apis(request):
             side_effect=_blocked_call("Seam SDK"),
         ),
         patch("app.integrations.docusign.client.httpx", blocked_httpx),
+        patch(
+            "app.integrations.claude.client.Anthropic",
+            side_effect=_blocked_call("Claude API"),
+        ),
     ):
         yield

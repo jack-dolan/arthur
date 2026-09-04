@@ -67,13 +67,14 @@ def send_new_booking_alert(
     *,
     alerts_service: Any,
     alerts_address: str,
+    alerts_to: str | None = None,
     dashboard_base_url: str,
 ) -> None:
     """Send the new-booking alert via the alerts Gmail account."""
     subject, body = build_new_booking_alert(booking, dashboard_base_url=dashboard_base_url)
 
     mime = MIMEText(body, "plain")
-    mime["To"] = alerts_address
+    mime["To"] = alerts_to or alerts_address
     mime["From"] = alerts_address
     mime["Subject"] = subject
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
@@ -180,6 +181,7 @@ def send_docusign_webhook_parse_failure_alert(
     payload_keys: list[str],
     alerts_service: Any,
     alerts_address: str,
+    alerts_to: str | None = None,
     dashboard_base_url: str,
 ) -> None:
     """Send the DocuSign webhook parse-failure alert via the alerts Gmail account."""
@@ -187,7 +189,7 @@ def send_docusign_webhook_parse_failure_alert(
         payload_keys=payload_keys, dashboard_base_url=dashboard_base_url
     )
     mime = MIMEText(body, "plain")
-    mime["To"] = alerts_address
+    mime["To"] = alerts_to or alerts_address
     mime["From"] = alerts_address
     mime["Subject"] = subject
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
@@ -237,6 +239,7 @@ def send_unparseable_email_alert(
     error: str,
     alerts_service: Any,
     alerts_address: str,
+    alerts_to: str | None = None,
     dashboard_base_url: str,
 ) -> None:
     """Send the unparseable-booking-email alert via the alerts Gmail account."""
@@ -247,7 +250,7 @@ def send_unparseable_email_alert(
         dashboard_base_url=dashboard_base_url,
     )
     mime = MIMEText(body, "plain")
-    mime["To"] = alerts_address
+    mime["To"] = alerts_to or alerts_address
     mime["From"] = alerts_address
     mime["Subject"] = subject
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
@@ -308,6 +311,7 @@ def send_cancellation_parse_failure_alert(
     classified_as: str,
     alerts_service: Any,
     alerts_address: str,
+    alerts_to: str | None = None,
     dashboard_base_url: str,
 ) -> None:
     """Send the unprocessable-cancellation alert via the alerts Gmail account."""
@@ -317,7 +321,7 @@ def send_cancellation_parse_failure_alert(
         dashboard_base_url=dashboard_base_url,
     )
     mime = MIMEText(body, "plain")
-    mime["To"] = alerts_address
+    mime["To"] = alerts_to or alerts_address
     mime["From"] = alerts_address
     mime["Subject"] = subject
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
@@ -372,6 +376,7 @@ def send_booking_alteration_alert(
     classified_as: str,
     alerts_service: Any,
     alerts_address: str,
+    alerts_to: str | None = None,
     dashboard_base_url: str,
 ) -> None:
     """Send the booking-alteration alert via the alerts Gmail account."""
@@ -381,7 +386,7 @@ def send_booking_alteration_alert(
         dashboard_base_url=dashboard_base_url,
     )
     mime = MIMEText(body, "plain")
-    mime["To"] = alerts_address
+    mime["To"] = alerts_to or alerts_address
     mime["From"] = alerts_address
     mime["Subject"] = subject
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
@@ -427,6 +432,7 @@ def send_docusign_keepalive_failure_alert(
     error: str,
     alerts_service: Any,
     alerts_address: str,
+    alerts_to: str | None = None,
     dashboard_base_url: str,
 ) -> None:
     """Send the keep-alive-failure alert via the alerts Gmail account."""
@@ -434,7 +440,7 @@ def send_docusign_keepalive_failure_alert(
         error=error, dashboard_base_url=dashboard_base_url
     )
     mime = MIMEText(body, "plain")
-    mime["To"] = alerts_address
+    mime["To"] = alerts_to or alerts_address
     mime["From"] = alerts_address
     mime["Subject"] = subject
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
@@ -489,6 +495,7 @@ def send_stalled_automations_alert(
     *,
     alerts_service: Any,
     alerts_address: str,
+    alerts_to: str | None = None,
     dashboard_base_url: str,
 ) -> None:
     """Send the stalled-automations digest via the alerts Gmail account."""
@@ -496,7 +503,7 @@ def send_stalled_automations_alert(
         items, dashboard_base_url=dashboard_base_url
     )
     mime = MIMEText(body, "plain")
-    mime["To"] = alerts_address
+    mime["To"] = alerts_to or alerts_address
     mime["From"] = alerts_address
     mime["Subject"] = subject
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
@@ -512,28 +519,74 @@ def build_access_code_problem_alert(
 
     Seam provisions codes on the lock ASYNCHRONOUSLY — a successful create
     call does not mean the code reached the device. Each *items* row carries:
-    guest, check_in, status, problem, booking_url.
+    guest, check_in, device_state, problem, booking_url.
+
+    ``device_state`` is Seam's ``is_scheduled_on_device`` rendered for a human,
+    and it is deliberately what this email leads with. It used to lead with the
+    code's ``status``, which reports whether a code is active *right now* — so
+    a healthy future booking showed "Seam status: unset" and the email read as
+    an emergency when nothing was wrong.
+
+    Each row also carries ``kind``: ``"lock"`` for a genuine device finding, or
+    ``"api_unreachable"`` when Seam could not be asked at all. When *every* row
+    is the latter the email must not tell the owner to check the lock — on
+    2026-07-29 it did exactly that about a code that was correctly programmed,
+    because a single dropped connection read the same as a bad code. A mixed
+    batch keeps the urgent wording: one real finding must not be softened by an
+    unreachable one beside it. Rows without ``kind`` count as lock problems, so
+    older callers are unaffected.
     """
-    subject = (
-        f"Door access code problem for {len(items)} upcoming booking(s) — check the lock"
+    all_unreachable = bool(items) and all(
+        item.get("kind") == "api_unreachable" for item in items
     )
-    lines = [
-        "The daily verification found door access codes that may NOT be working "
-        "on the lock:",
-        "",
-    ]
+    if all_unreachable:
+        subject = (
+            f"Could not verify {len(items)} door access code(s) — "
+            "the Seam API was unreachable"
+        )
+        lines = [
+            "The daily verification could not reach the Seam API, so these "
+            "codes could not be checked. This may not be a lock problem at all "
+            "— the codes may be fine:",
+            "",
+        ]
+    else:
+        subject = (
+            f"Door access code problem for {len(items)} upcoming booking(s) — "
+            "check the lock"
+        )
+        lines = [
+            "The daily verification found door access codes that may NOT be "
+            "working on the lock:",
+            "",
+        ]
     for item in items:
         lines.append(
             f"  • {item['guest']} (check-in {item['check_in']}) — "
-            f"Seam status: {item['status']}"
+            f"code on the lock: {item['device_state']}"
         )
         lines.append(f"      problem: {item['problem']}")
         lines.append(f"      {item['booking_url']}")
+    if all_unreachable:
+        lines += [
+            "",
+            "Action: usually none. Tomorrow's run checks again, and a one-off "
+            "network or API blip resolves itself. If the same codes cannot be "
+            "verified again tomorrow, check the Seam dashboard — and confirm the "
+            "code in the Schlage app before the guest arrives.",
+            "",
+            "(A code's name in the Schlage app is truncated by Seam to fit the "
+            "lock's 12-character limit, so a shortened name is normal and is not "
+            "a fault.)",
+        ]
+    else:
+        lines += [
+            "",
+            "Action needed: check the lock's Wi-Fi/power and the Seam dashboard. "
+            "If the code cannot be fixed before check-in, set a code on the lock "
+            "manually (or send the guest a keypad code another way).",
+        ]
     lines += [
-        "",
-        "Action needed: check the lock's Wi-Fi/power and the Seam dashboard. "
-        "If the code cannot be fixed before check-in, set a code on the lock "
-        "manually (or send the guest a keypad code another way).",
         "",
         f"  Dashboard:  {dashboard_base_url.rstrip('/')}/",
     ]
@@ -545,6 +598,7 @@ def send_access_code_problem_alert(
     *,
     alerts_service: Any,
     alerts_address: str,
+    alerts_to: str | None = None,
     dashboard_base_url: str,
 ) -> None:
     """Send the access-code verification alert via the alerts Gmail account."""
@@ -552,7 +606,7 @@ def send_access_code_problem_alert(
         items, dashboard_base_url=dashboard_base_url
     )
     mime = MIMEText(body, "plain")
-    mime["To"] = alerts_address
+    mime["To"] = alerts_to or alerts_address
     mime["From"] = alerts_address
     mime["Subject"] = subject
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
@@ -743,6 +797,7 @@ def send_reminder_alert(
     *,
     alerts_service: Any,
     alerts_address: str,
+    alerts_to: str | None = None,
     dashboard_base_url: str,
     threshold_days: int,
 ) -> None:
@@ -755,7 +810,7 @@ def send_reminder_alert(
     )
 
     mime = MIMEText(body, "plain")
-    mime["To"] = alerts_address
+    mime["To"] = alerts_to or alerts_address
     mime["From"] = alerts_address
     mime["Subject"] = subject
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
@@ -809,6 +864,7 @@ def send_credential_sentinel_alert(
     failures: list[dict],
     alerts_service: Any,
     alerts_address: str,
+    alerts_to: str | None = None,
     dashboard_base_url: str,
 ) -> None:
     """Send the credential-sentinel failure alert via the alerts Gmail account."""
@@ -816,7 +872,7 @@ def send_credential_sentinel_alert(
         failures=failures, dashboard_base_url=dashboard_base_url
     )
     mime = MIMEText(body, "plain")
-    mime["To"] = alerts_address
+    mime["To"] = alerts_to or alerts_address
     mime["From"] = alerts_address
     mime["Subject"] = subject
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
@@ -873,6 +929,7 @@ def send_classifier_drift_digest(
     items: list[dict],
     alerts_service: Any,
     alerts_address: str,
+    alerts_to: str | None = None,
     dashboard_base_url: str,
 ) -> None:
     """Send the weekly classifier-drift digest via the alerts Gmail account."""
@@ -880,13 +937,130 @@ def send_classifier_drift_digest(
         items=items, dashboard_base_url=dashboard_base_url
     )
     mime = MIMEText(body, "plain")
-    mime["To"] = alerts_address
+    mime["To"] = alerts_to or alerts_address
     mime["From"] = alerts_address
     mime["Subject"] = subject
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
 
     alerts_service.users().messages().send(userId="me", body={"raw": raw}).execute()
     log.info("Sent classifier-drift digest (%d suspect emails)", len(items))
+
+
+# ---------------------------------------------------------------------------
+# Weekly LLM inbox review (sustainability audit 2026-07-23, item 4, second layer)
+# ---------------------------------------------------------------------------
+
+def build_llm_inbox_review_alert(
+    *,
+    suspects: list[dict],
+    unreviewable: list[dict],
+    reviewed_count: int,
+    not_reviewed_count: int,
+    dashboard_base_url: str,
+) -> tuple[str, str]:
+    """Return (subject, body) for the weekly LLM inbox review.
+
+    Sent ONLY when there is something to act on: at least one email judged a
+    probable missed booking, or at least one the reviewer could not read a
+    verdict for. A clean week sends nothing, because the separate non-AI digest
+    already gives the owner the full list to eyeball.
+
+    *suspects* rows carry date, sender, subject, snippet, reason, confidence.
+    *unreviewable* rows carry date, sender, subject, snippet, error.
+    """
+    if suspects:
+        subject = (
+            f"Possible missed booking: {len(suspects)} email(s) need your eyes"
+        )
+    else:
+        subject = (
+            f"Inbox review incomplete: {len(unreviewable)} email(s) could not be "
+            "checked"
+        )
+
+    lines: list[str] = []
+
+    if suspects:
+        lines += [
+            "These emails were discarded as unrecognised, but on review they "
+            "look like real bookings the classifier missed. If any is real, the "
+            "guest currently has no door code and no form.",
+            "",
+        ]
+        for item in suspects:
+            lines.append(f"  • {item['date']}  {item['sender']}")
+            lines.append(f"      Subject:  {item['subject']}")
+            lines.append(
+                f"      Why:      {item['reason']} ({item['confidence']} confidence)"
+            )
+            if item.get("snippet"):
+                lines.append(f"      Body:     {item['snippet']}")
+            lines.append("")
+        lines += [
+            "What to do with a real one: enter the booking manually via the "
+            "dashboard now, then open a Claude Code session with the email as a "
+            "sample so the classifier learns the new format (the VRBO format "
+            "break of 2026-07-05 is the precedent).",
+            "",
+            "This check is advisory and changes nothing on its own. Nothing has "
+            "been ingested, altered, or deleted.",
+            "",
+        ]
+
+    if unreviewable:
+        lines += [
+            f"{len(unreviewable)} email(s) could not be reviewed and need a "
+            "human eye. Treat them as unchecked, not as cleared:",
+            "",
+        ]
+        for item in unreviewable:
+            lines.append(f"  • {item['date']}  {item['sender']}")
+            lines.append(f"      Subject:  {item['subject']}")
+            lines.append(f"      Problem:  {item['error']}")
+            lines.append("")
+
+    lines.append(f"Reviewed this run: {reviewed_count} email(s).")
+    if not_reviewed_count:
+        lines.append(
+            f"Not reviewed: {not_reviewed_count} email(s) — the run hit its "
+            "per-run item or token cap. They stay in the weekly digest."
+        )
+    lines += ["", f"  Dashboard:  {dashboard_base_url.rstrip('/')}/"]
+
+    return subject, "\n".join(lines)
+
+
+def send_llm_inbox_review_alert(
+    *,
+    suspects: list[dict],
+    unreviewable: list[dict],
+    reviewed_count: int,
+    not_reviewed_count: int,
+    alerts_service: Any,
+    alerts_address: str,
+    alerts_to: str | None = None,
+    dashboard_base_url: str,
+) -> None:
+    """Send the weekly LLM inbox review alert via the alerts Gmail account."""
+    subject, body = build_llm_inbox_review_alert(
+        suspects=suspects,
+        unreviewable=unreviewable,
+        reviewed_count=reviewed_count,
+        not_reviewed_count=not_reviewed_count,
+        dashboard_base_url=dashboard_base_url,
+    )
+    mime = MIMEText(body, "plain")
+    mime["To"] = alerts_to or alerts_address
+    mime["From"] = alerts_address
+    mime["Subject"] = subject
+    raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
+
+    alerts_service.users().messages().send(userId="me", body={"raw": raw}).execute()
+    log.info(
+        "Sent LLM inbox review alert (%d suspect, %d unreviewable)",
+        len(suspects),
+        len(unreviewable),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -903,8 +1077,16 @@ def build_monthly_status_report(
     absence (noticed by the owner, or by the external monitor's heartbeat
     checks) is itself the alarm.
     """
+    # A reviewer that never ran is a finding, not a quiet month: it emails only
+    # when it finds something, so its silence is otherwise indistinguishable
+    # from it being dead. Four weekly runs are expected in any 30-day window.
+    reviewer_runs = stats.get("inbox_reviewer_runs_30d", 0)
+    reviewer_dead = reviewer_runs == 0
+
     attention = stats.get("failed_tasks", 0) + stats.get("stuck_in_progress", 0)
-    health = "systems normal" if attention == 0 else "needs attention"
+    health = (
+        "systems normal" if attention == 0 and not reviewer_dead else "needs attention"
+    )
     subject = f"Rental automation monthly status: {health}"
 
     token_age = stats.get("docusign_token_store_age_days")
@@ -923,10 +1105,23 @@ def build_monthly_status_report(
         f"  Dead letters, 30d (noise):      {stats.get('dead_letters_other_30d', 0)}",
         f"  Dead letters, 30d (errors):     {stats.get('dead_letters_error_30d', 0)}",
         f"  DocuSign token store:           {token_line}",
+        f"  Inbox reviewer:                 {reviewer_runs} run(s), "
+        f"{stats.get('inbox_reviewer_emails_30d', 0)} email(s) reviewed",
         "",
         "If the FAILED / stuck counts are non-zero, check the dashboard and "
         "the stalled-automations digests.",
-        "",
+        "",]
+    if reviewer_dead:
+        lines += [
+            "The weekly inbox reviewer DID NOT RUN in the last 30 days. It "
+            "normally runs four times. It is the check that catches a platform "
+            "rewording its booking emails, and it stays silent when it finds "
+            "nothing, so this line is the only place its absence shows. Check "
+            "the app logs for 'review_dead_letters' and the credential "
+            "sentinel's Anthropic check.",
+            "",
+        ]
+    lines += [
         "This email arrives on the 1st of every month. Its ABSENCE means the "
         "app or its alert channel is down — check the uptime monitor and the "
         "heartbeat dashboard.",
@@ -941,6 +1136,7 @@ def send_monthly_status_report(
     stats: dict,
     alerts_service: Any,
     alerts_address: str,
+    alerts_to: str | None = None,
     dashboard_base_url: str,
 ) -> None:
     """Send the monthly status report via the alerts Gmail account."""
@@ -948,7 +1144,7 @@ def send_monthly_status_report(
         stats=stats, dashboard_base_url=dashboard_base_url
     )
     mime = MIMEText(body, "plain")
-    mime["To"] = alerts_address
+    mime["To"] = alerts_to or alerts_address
     mime["From"] = alerts_address
     mime["Subject"] = subject
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()

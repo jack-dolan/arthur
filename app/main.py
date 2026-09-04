@@ -8,8 +8,15 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.preview import (
+    assert_no_real_credentials,
+    is_preview_mode,
+    seed_demo_bookings,
+)
 from app.routers import auth, dashboard, health, webhooks
 from app.settings import settings
+
+log = logging.getLogger(__name__)
 
 _LOG_HANDLER_NAME = "app-stdout"
 
@@ -78,25 +85,49 @@ _REQUIRED_CREDENTIALS = [
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _configure_logging()
-    # S105: comparing against the placeholder IS the check that rejects it.
-    if settings.secret_key == "insecure-default-change-in-production":  # noqa: S105
-        raise ValueError(
-            "secret_key is set to the default placeholder. "
-            "Set SECRET_KEY in .env before starting the server. "
-            "(It signs the dashboard session cookie — must be a strong secret.)"
+    preview = is_preview_mode()
+
+    if preview:
+        # A preview holds no real credentials by design, so the production boot
+        # checks below would reject it. This check replaces them, and is
+        # stricter in the direction that matters: it refuses to start if
+        # anything in the environment looks real. See app/preview.py.
+        log.warning(
+            "PREVIEW MODE is ON (PREVIEW_MODE=1): no scheduler jobs will run, "
+            "no outbound client will be constructed, and all booking data is fake"
         )
-    for field_name, env_name in _REQUIRED_CREDENTIALS:
-        if not getattr(settings, field_name):
+        assert_no_real_credentials()
+    else:
+        # S105: comparing against the placeholder IS the check that rejects it.
+        if settings.secret_key == "insecure-default-change-in-production":  # noqa: S105
             raise ValueError(
-                f"{field_name} is not set. "
-                f"Add {env_name}=<your-value> to .env and restart."
+                "secret_key is set to the default placeholder. "
+                "Set SECRET_KEY in .env before starting the server. "
+                "(It signs the dashboard session cookie — must be a strong secret.)"
             )
-    if "change_me" in settings.database_url:
-        raise ValueError(
-            "DATABASE_URL still contains the default placeholder 'change_me'. "
-            "Set DATABASE_URL in .env before starting the server."
-        )
+        for field_name, env_name in _REQUIRED_CREDENTIALS:
+            if not getattr(settings, field_name):
+                raise ValueError(
+                    f"{field_name} is not set. "
+                    f"Add {env_name}=<your-value> to .env and restart."
+                )
+        if "change_me" in settings.database_url:
+            raise ValueError(
+                "DATABASE_URL still contains the default placeholder 'change_me'. "
+                "Set DATABASE_URL in .env before starting the server."
+            )
+
     Path("/app/data/pdfs").mkdir(parents=True, exist_ok=True)
+
+    if preview:
+        # Give the dashboard something to show, then register nothing at all:
+        # no poller, no keep-alives, no digests, no reminder scans.
+        await seed_demo_bookings()
+        log.warning(
+            "PREVIEW MODE: scheduler not started — zero jobs registered"
+        )
+        yield
+        return
 
     # State the DocuSign environment on every boot — the go-live cutover
     # (DOCUSIGN_SANDBOX=false) is confirmed from this line.
@@ -104,6 +135,7 @@ async def lifespan(app: FastAPI):
 
     log_docusign_target()
 
+    from app.ingestion.inbox_reviewer import review_dead_letters
     from app.ingestion.poller import poll_booking_feed
     from app.tasks.scheduled import (
         check_classifier_drift,
@@ -203,6 +235,22 @@ async def lifespan(app: FastAPI):
         misfire_grace_time=None,
         coalesce=True,
     )
+    # Sustainability audit item 4, second layer: weekly LLM review of the same
+    # dead-letters the digest above lists, asking whether any is a booking the
+    # classifier missed. Alert-only. Runs an hour after the digest so the two
+    # emails arrive together rather than the AI one landing first and being
+    # read as the whole picture. Cron, not interval, for the same
+    # restart-starvation reason as the DocuSign keep-alive.
+    scheduler.add_job(
+        review_dead_letters,
+        "cron",
+        day_of_week="sun",
+        hour=10,
+        timezone="US/Eastern",
+        id="review_dead_letters",
+        misfire_grace_time=None,
+        coalesce=True,
+    )
     # Sustainability audit item 3: monthly positive-confirmation email — proves
     # the alert send path end-to-end; its absence is itself a signal.
     scheduler.add_job(
@@ -216,6 +264,15 @@ async def lifespan(app: FastAPI):
         coalesce=True,
     )
     scheduler.start()
+
+    # Say what was registered, and when each job next fires. APScheduler's own
+    # logger is not configured (logging is scoped to the "app" namespace), so
+    # without this the only evidence that a job exists in a RUNNING container is
+    # inference from the source. That is not good enough for verifying a deploy:
+    # a job silently lost in a refactor would look exactly like a job that has
+    # not fired yet. Read this line after every deploy.
+    for job in scheduler.get_jobs():
+        log.info("SCHEDULED JOBS: %s next fires %s", job.id, job.next_run_time)
 
     yield
 

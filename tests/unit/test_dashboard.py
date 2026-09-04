@@ -981,3 +981,209 @@ def test_latest_access_code_none_when_absent():
     booking = _make_booking()
     booking.data_points = []
     assert _latest_access_code(booking) is None
+
+
+# ---------------------------------------------------------------------------
+# Contact save: a stored value and a submitted value are the same value when
+# they normalize to the same thing (2026-09-01).
+#
+# The parsers store a phone as the platform wrote it ("+1 5551234567") and an
+# email as the platform wrote it ("Guest Example <guest@example.com>"). The
+# form pre-fills those raw strings. _validate_phone / _validate_email then
+# normalize what comes back. Comparing a normalized submission against a raw
+# stored value made every untouched pre-filled field read as an edit, which
+# demanded the confirm checkbox, rewrote provenance to MANUAL_ENTRY, and
+# deleted a working door code to re-create the identical one.
+# ---------------------------------------------------------------------------
+
+
+async def test_save_contact_resubmitting_formatted_phone_needs_no_confirmation():
+    """The form pre-fills the stored '+1 5551234567'. Sending it straight back
+    is not a change, so it needs no confirm box and writes no data point."""
+    from app.routers.dashboard import save_contact
+
+    booking = _make_booking(guest_phone="+1 5551234567", guest_email=None)
+    booking.tasks = []
+    mock_session = _mock_session_for(booking)
+
+    with (
+        patch("app.routers.dashboard.delete_seam_access_code") as mock_delete,
+        patch("app.routers.dashboard._dispatch_pending_tasks") as mock_dispatch,
+        patch("app.routers.dashboard.asyncio.create_task"),
+    ):
+        mock_dispatch.return_value = AsyncMock()
+        response = await save_contact(
+            booking_id=booking.id,
+            request=_post_ctx(),
+            guest_phone="+1 5551234567",
+            guest_email=None,
+            confirm_overwrite=None,
+            db=mock_session,
+        )
+
+    assert response.status_code == 303
+    assert booking.guest_phone == "+1 5551234567"
+    mock_delete.assert_not_called()
+    assert not any(
+        isinstance(call.args[0], DataPoint)
+        and call.args[0].field_name == "guest_phone"
+        for call in mock_session.add.call_args_list
+    )
+
+
+async def test_save_contact_resubmitting_formatted_phone_keeps_access_code():
+    """The same untouched resubmit must not delete the door code already on
+    the lock, even when the owner ticks the confirm box to get past the
+    spurious warning."""
+    from app.routers.dashboard import save_contact
+
+    booking = _make_booking(guest_phone="+1 5551234567", guest_email=None)
+    access_task = BookingTask(
+        id=uuid.uuid4(),
+        booking_id=booking.id,
+        task_type=TaskType.ACCESS_CODE_CREATE,
+        state=TaskState.COMPLETE,
+        external_ref="seam-code-old",
+        completed_at=datetime.now(timezone.utc),
+    )
+    booking.tasks = [access_task]
+    mock_session = _mock_session_for(booking)
+
+    with (
+        patch("app.routers.dashboard.delete_seam_access_code") as mock_delete,
+        patch("app.routers.dashboard._dispatch_pending_tasks") as mock_dispatch,
+        patch("app.routers.dashboard.asyncio.create_task"),
+    ):
+        mock_dispatch.return_value = AsyncMock()
+        response = await save_contact(
+            booking_id=booking.id,
+            request=_post_ctx(),
+            guest_phone="+1 5551234567",
+            guest_email="guest@example.com",
+            confirm_overwrite="1",
+            db=mock_session,
+        )
+
+    assert response.status_code == 303
+    assert booking.guest_email == "guest@example.com"
+    mock_delete.assert_not_called()
+    assert access_task.state == TaskState.COMPLETE
+    assert access_task.external_ref == "seam-code-old"
+
+
+async def test_save_contact_resubmitting_display_name_email_needs_no_confirmation():
+    """A stored 'Guest Example <guest@example.com>' normalizes to the bare
+    address, so resubmitting it is not a change and voids no envelope."""
+    from app.routers.dashboard import save_contact
+
+    booking = _make_booking(
+        guest_phone=None, guest_email="Guest Example <guest@example.com>"
+    )
+    booking.signed_pdf_path = None
+    docusign_task = BookingTask(
+        id=uuid.uuid4(),
+        booking_id=booking.id,
+        task_type=TaskType.DOCUSIGN_SEND,
+        state=TaskState.COMPLETE,
+        external_ref="envelope-old",
+        completed_at=datetime.now(timezone.utc),
+    )
+    booking.tasks = [docusign_task]
+    mock_session = _mock_session_for(booking)
+
+    with (
+        patch("app.routers.dashboard.void_envelope_idempotent") as mock_void,
+        patch("app.routers.dashboard._dispatch_pending_tasks") as mock_dispatch,
+        patch("app.routers.dashboard.asyncio.create_task"),
+    ):
+        mock_dispatch.return_value = AsyncMock()
+        response = await save_contact(
+            booking_id=booking.id,
+            request=_post_ctx(),
+            guest_phone=None,
+            guest_email="Guest Example <guest@example.com>",
+            confirm_overwrite=None,
+            db=mock_session,
+        )
+
+    assert response.status_code == 303
+    mock_void.assert_not_called()
+    assert docusign_task.state == TaskState.COMPLETE
+    assert docusign_task.external_ref == "envelope-old"
+
+
+async def test_save_contact_resubmitting_email_in_other_case_needs_no_confirmation():
+    """Letter case does not change which mailbox an address reaches, so a
+    case-only difference is not a correction worth resending an envelope."""
+    from app.routers.dashboard import save_contact
+
+    booking = _make_booking(guest_phone=None, guest_email="guest@example.com")
+    booking.signed_pdf_path = None
+    booking.tasks = []
+    mock_session = _mock_session_for(booking)
+
+    with (
+        patch("app.routers.dashboard.void_envelope_idempotent") as mock_void,
+        patch("app.routers.dashboard._dispatch_pending_tasks") as mock_dispatch,
+        patch("app.routers.dashboard.asyncio.create_task"),
+    ):
+        mock_dispatch.return_value = AsyncMock()
+        response = await save_contact(
+            booking_id=booking.id,
+            request=_post_ctx(),
+            guest_phone=None,
+            guest_email="Guest@Example.com",
+            confirm_overwrite=None,
+            db=mock_session,
+        )
+
+    assert response.status_code == 303
+    assert booking.guest_email == "guest@example.com"
+    mock_void.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Contact save: a phone correction that keeps the last four digits produces
+# the identical door code, so the code already on the lock stays (2026-09-01).
+# ---------------------------------------------------------------------------
+
+
+async def test_save_contact_phone_change_keeping_last_four_keeps_access_code():
+    """The door PIN is the phone's last four digits and the window comes from
+    the stay dates, neither of which this correction changes. Deleting and
+    re-creating would ask Seam for a code it already holds, which Seam rejects
+    as a duplicate while its delete is still propagating."""
+    from app.routers.dashboard import save_contact
+
+    booking = _make_booking(guest_phone="5551234567", guest_email=None)
+    access_task = BookingTask(
+        id=uuid.uuid4(),
+        booking_id=booking.id,
+        task_type=TaskType.ACCESS_CODE_CREATE,
+        state=TaskState.COMPLETE,
+        external_ref="seam-code-old",
+        completed_at=datetime.now(timezone.utc),
+    )
+    booking.tasks = [access_task]
+    mock_session = _mock_session_for(booking)
+
+    with (
+        patch("app.routers.dashboard.delete_seam_access_code") as mock_delete,
+        patch("app.routers.dashboard._dispatch_pending_tasks") as mock_dispatch,
+        patch("app.routers.dashboard.asyncio.create_task"),
+    ):
+        mock_dispatch.return_value = AsyncMock()
+        response = await save_contact(
+            booking_id=booking.id,
+            request=_post_ctx(),
+            guest_phone="5559994567",
+            guest_email=None,
+            confirm_overwrite="1",
+            db=mock_session,
+        )
+
+    assert response.status_code == 303
+    assert booking.guest_phone == "5559994567"  # the correction is still saved
+    mock_delete.assert_not_called()
+    assert access_task.state == TaskState.COMPLETE
+    assert access_task.external_ref == "seam-code-old"

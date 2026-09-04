@@ -226,9 +226,12 @@ async def test_persist_booking_writes_booking_and_data_points():
         policy=policy.default,
     )
 
-    with patch("app.ingestion.poller.AsyncSessionLocal", return_value=_async_ctx(session)):
-        with patch("app.integrations.gmail.oauth.get_alerts_service"):
-            await persist_booking("msg-test-1", msg, parsed, Platform.AIRBNB)
+    with (
+        patch("app.ingestion.poller.AsyncSessionLocal", return_value=_async_ctx(session)),
+        patch("app.integrations.gmail.oauth.get_alerts_service"),
+        patch("app.tasks.dispatch._dispatch_pending_tasks"),
+    ):
+        await persist_booking("msg-test-1", msg, parsed, Platform.AIRBNB)
 
     session.add.assert_called_once()
     booking_arg = session.add.call_args[0][0]
@@ -289,6 +292,7 @@ async def test_persist_booking_completes_alert_task_on_send_success():
         patch("app.integrations.gmail.oauth.get_alerts_service"),
         patch("app.ingestion.alerts.send_new_booking_alert") as mock_send,
         patch("app.config.load_config") as mock_cfg,
+        patch("app.tasks.dispatch._dispatch_pending_tasks"),
     ):
         mock_cfg.return_value.email.alerts = "alerts@example.com"
         mock_cfg.return_value.properties = [MagicMock(id="property_1")]
@@ -326,6 +330,7 @@ async def test_persist_booking_records_alert_failure_and_stays_pending():
             side_effect=RuntimeError("gmail boom"),
         ),
         patch("app.config.load_config") as mock_cfg,
+        patch("app.tasks.dispatch._dispatch_pending_tasks"),
     ):
         mock_cfg.return_value.email.alerts = "alerts@example.com"
         mock_cfg.return_value.properties = [MagicMock(id="property_1")]
@@ -339,6 +344,117 @@ async def test_persist_booking_records_alert_failure_and_stays_pending():
     assert alert_task.state == TaskState.PENDING
     assert alert_task.last_error is not None
     assert "gmail boom" in alert_task.last_error
+
+
+# ---------------------------------------------------------------------------
+# Dispatch-at-ingestion (owner request 2026-07-31)
+#
+# CONTEXT.md's task graph says the cleaner-schedule row is added "immediately on
+# booking". It was not: nothing dispatched the PENDING CLEANER_SHEET_ADD until
+# the owner saved a contact field (or the daily requeue sweep ran the next day),
+# so a booking with no phone and no email yet showed an empty cleaner sheet.
+# ---------------------------------------------------------------------------
+
+
+def _id_assigning_add(session):
+    """Give a mocked session.add() the one real-flush behaviour we depend on:
+    the Python-side ``default=uuid.uuid4`` primary key. Without it every
+    booking.id is None and an id assertion passes vacuously."""
+    import uuid as uuid_lib
+
+    from app.db.models import Booking
+
+    def _add(obj):
+        if isinstance(obj, Booking) and obj.id is None:
+            obj.id = uuid_lib.uuid4()
+
+    session.add = MagicMock(side_effect=_add)
+    return session
+
+
+async def test_persist_booking_dispatches_ready_tasks_immediately():
+    """A new booking's ready-now automations must run at ingestion, not wait for
+    the owner to save contact info."""
+    from app.db.models import Platform
+    from app.ingestion.poller import persist_booking
+
+    parsed, msg = _persist_args()
+    session = AsyncMock()
+    _id_assigning_add(session)
+    session.execute = AsyncMock(  # duplicate pre-check finds nothing
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    )
+
+    with (
+        patch("app.ingestion.poller.AsyncSessionLocal", return_value=_async_ctx(session)),
+        patch("app.integrations.gmail.oauth.get_alerts_service"),
+        patch("app.ingestion.alerts.send_new_booking_alert"),
+        patch("app.config.load_config") as mock_cfg,
+        patch("app.tasks.dispatch._dispatch_pending_tasks") as mock_dispatch,
+    ):
+        mock_cfg.return_value.email.alerts = "alerts@example.com"
+        mock_cfg.return_value.properties = [MagicMock(id="property_1")]
+        await persist_booking("msg-dispatch-now", msg, parsed, Platform.AIRBNB)
+
+    booking_arg = session.add.call_args[0][0]
+    mock_dispatch.assert_awaited_once_with(booking_arg.id)
+    assert booking_arg.id is not None
+
+
+async def test_persist_booking_does_not_dispatch_a_duplicate():
+    """A re-sent confirmation is dead-lettered, not dispatched — dispatching it
+    would re-run automations against the booking that already exists."""
+    from app.db.models import Platform
+    from app.ingestion.poller import persist_booking
+
+    parsed, msg = _persist_args()
+    session = AsyncMock()
+    _id_assigning_add(session)
+    session.execute = AsyncMock(  # duplicate pre-check FINDS an existing booking
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value="existing-id"))
+    )
+
+    with (
+        patch("app.ingestion.poller.AsyncSessionLocal", return_value=_async_ctx(session)),
+        patch("app.ingestion.poller._record_processed_message", new=AsyncMock()),
+        patch("app.integrations.gmail.oauth.get_alerts_service"),
+        patch("app.ingestion.alerts.send_new_booking_alert"),
+        patch("app.tasks.dispatch._dispatch_pending_tasks") as mock_dispatch,
+    ):
+        await persist_booking("msg-dup-dispatch", msg, parsed, Platform.AIRBNB)
+
+    mock_dispatch.assert_not_awaited()
+
+
+async def test_persist_booking_survives_a_dispatch_failure():
+    """The booking row is already committed when dispatch runs. A dispatch
+    failure must not propagate — it would abort the poll of later messages and
+    leave the message looking unprocessed. The daily requeue sweep is the retry."""
+    from app.db.models import Platform
+    from app.ingestion.poller import persist_booking
+
+    parsed, msg = _persist_args()
+    session = AsyncMock()
+    _id_assigning_add(session)
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    )
+
+    with (
+        patch("app.ingestion.poller.AsyncSessionLocal", return_value=_async_ctx(session)),
+        patch("app.integrations.gmail.oauth.get_alerts_service"),
+        patch("app.ingestion.alerts.send_new_booking_alert"),
+        patch("app.config.load_config") as mock_cfg,
+        patch(
+            "app.tasks.dispatch._dispatch_pending_tasks",
+            side_effect=RuntimeError("sheets boom"),
+        ) as mock_dispatch,
+    ):
+        mock_cfg.return_value.email.alerts = "alerts@example.com"
+        mock_cfg.return_value.properties = [MagicMock(id="property_1")]
+        await persist_booking("msg-dispatch-boom", msg, parsed, Platform.AIRBNB)
+
+    mock_dispatch.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -736,3 +852,62 @@ async def test_poll_gmail_auth_failure_does_not_ping_heartbeat():
         await poll_booking_feed()
 
     mock_ping.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# _initial_tasks and the cleaner-sheet kill switch (2026-08-02)
+#
+# The handler is the authoritative guard, but creating the row PENDING when the
+# automation is off would leave every new booking showing outstanding work that
+# will never be done, and would hand the daily requeue job something to retry.
+# ---------------------------------------------------------------------------
+
+def test_initial_tasks_creates_cleaner_row_pending_when_enabled():
+    """Default behaviour is unchanged: the cleaner task starts PENDING."""
+    from app.db.models import Platform, TaskState, TaskType
+    from app.ingestion.poller import _initial_tasks
+
+    tasks = _initial_tasks(
+        Platform.AIRBNB, has_phone=True, has_email=True, cleaner_enabled=True
+    )
+    cleaner = next(t for t in tasks if t.task_type == TaskType.CLEANER_SHEET_ADD)
+    assert cleaner.state == TaskState.PENDING
+
+
+def test_initial_tasks_creates_cleaner_row_skipped_when_disabled():
+    """Disabled: the row still exists (the dashboard shows a full task list) but is SKIPPED."""
+    from app.db.models import Platform, TaskState, TaskType
+    from app.ingestion.poller import _initial_tasks
+
+    tasks = _initial_tasks(
+        Platform.AIRBNB, has_phone=True, has_email=True, cleaner_enabled=False
+    )
+    cleaner = next(t for t in tasks if t.task_type == TaskType.CLEANER_SHEET_ADD)
+    assert cleaner.state == TaskState.SKIPPED
+
+
+def test_initial_tasks_cleaner_enabled_defaults_to_true():
+    """Callers that predate the flag keep the old behaviour."""
+    from app.db.models import Platform, TaskState, TaskType
+    from app.ingestion.poller import _initial_tasks
+
+    tasks = _initial_tasks(Platform.AIRBNB, has_phone=True, has_email=True)
+    cleaner = next(t for t in tasks if t.task_type == TaskType.CLEANER_SHEET_ADD)
+    assert cleaner.state == TaskState.PENDING
+
+
+def test_initial_tasks_disabling_cleaner_leaves_other_tasks_untouched():
+    """The switch is surgical: DocuSign, HOA and access-code tasks keep their states."""
+    from app.db.models import Platform, TaskState, TaskType
+    from app.ingestion.poller import _initial_tasks
+
+    on = {t.task_type: t.state for t in _initial_tasks(
+        Platform.AIRBNB, has_phone=True, has_email=True, cleaner_enabled=True)}
+    off = {t.task_type: t.state for t in _initial_tasks(
+        Platform.AIRBNB, has_phone=True, has_email=True, cleaner_enabled=False)}
+
+    assert on.keys() == off.keys(), "the task set itself must not change"
+    differing = {k for k in on if on[k] != off[k]}
+    assert differing == {TaskType.CLEANER_SHEET_ADD}
+    assert off[TaskType.DOCUSIGN_SEND] == TaskState.PENDING
+    assert off[TaskType.HOA_EMAIL] == TaskState.WAITING

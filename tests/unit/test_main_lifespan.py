@@ -516,12 +516,18 @@ async def test_lifespan_logs_docusign_target():
 
 
 def test_settings_has_no_dead_scraping_fields():
-    """Settings class must not contain dead scraping credential fields (D-11)."""
+    """Settings class must not contain dead scraping credential fields (D-11).
+
+    ``anthropic_api_key`` was on this list and has been removed from it. It was
+    dead because ADR 0004 deleted the Claude-API guest-reply parsing flow along
+    with scraping. It is live again for an unrelated purpose — the weekly
+    read-only inbox drift reviewer — which ADR 0004's 2026-07-30 amendment
+    records. Scraping is still gone, and that is what this test guards.
+    """
     from app.settings import Settings
     dead_fields = [
         "airbnb_username", "airbnb_password",
         "vrbo_username", "vrbo_password",
-        "anthropic_api_key",
     ]
     defined = set(Settings.model_fields.keys())
     for field in dead_fields:
@@ -740,3 +746,60 @@ async def test_lifespan_registers_monthly_status_report_cron():
     assert c.kwargs.get("id") == "send_monthly_status_email"
     assert c.kwargs.get("coalesce") is True
     assert c.kwargs.get("misfire_grace_time") is None
+
+
+@pytest.mark.asyncio
+async def test_lifespan_registers_review_dead_letters_weekly_cron():
+    """Cron, not interval. An interval job restarts its countdown on every
+    container restart, so a run of deploys spaced under a week apart starves it
+    indefinitely — the lesson the DocuSign keep-alive taught."""
+    from app.ingestion.inbox_reviewer import review_dead_letters
+
+    mock_scheduler = MagicMock()
+    mock_scheduler_cls = MagicMock(return_value=mock_scheduler)
+    with (
+        patch("app.main.AsyncIOScheduler", mock_scheduler_cls),
+        patch("app.main.settings", _make_mock_settings()),
+        patch("pathlib.Path.mkdir"),
+    ):
+        await _run_lifespan(mock_scheduler_cls)
+
+    c = _job_call(mock_scheduler, review_dead_letters)
+    assert c is not None, "review_dead_letters not registered"
+    assert c.args[1] == "cron"
+    assert c.kwargs.get("day_of_week") == "sun"
+    assert c.kwargs.get("hour") == 10
+    assert c.kwargs.get("timezone") == "US/Eastern"
+    assert c.kwargs.get("id") == "review_dead_letters"
+    assert c.kwargs.get("coalesce") is True
+    assert c.kwargs.get("misfire_grace_time") is None
+
+
+@pytest.mark.asyncio
+async def test_lifespan_logs_the_registered_jobs_and_their_next_fire_times():
+    """APScheduler's own logger is not configured (logging is scoped to the
+    "app" namespace), so without this the only evidence a job is registered in
+    a RUNNING container is inference from the source. A boot-time manifest
+    makes it observable, which is what a deploy verification actually needs."""
+    import logging
+
+    scheduled_job = MagicMock()
+    scheduled_job.id = "review_dead_letters"
+    scheduled_job.next_run_time = "2026-08-02 10:00:00-04:00"
+
+    mock_scheduler = MagicMock()
+    mock_scheduler.get_jobs.return_value = [scheduled_job]
+
+    with (
+        patch("app.main.AsyncIOScheduler", MagicMock(return_value=mock_scheduler)),
+        patch("app.main.settings", _make_mock_settings()),
+        patch("pathlib.Path.mkdir"),
+        patch.object(logging.getLogger("app.main"), "info") as log_info,
+    ):
+        async with lifespan(MagicMock()):
+            pass
+
+    logged = " ".join(str(call) for call in log_info.call_args_list)
+    assert "SCHEDULED JOBS" in logged
+    assert "review_dead_letters" in logged
+    assert "2026-08-02 10:00:00-04:00" in logged

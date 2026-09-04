@@ -68,15 +68,20 @@ fire (check-in passed, booking cancelled — swept daily).
   Wrapped in try/except — a send failure is logged, non-fatal, booking still persists.
   (poller.py:208)
 
-**State after Step 1:** booking ACTIVE. `CLEANER_SHEET_ADD` PENDING but *not yet run*
-(the poller does **not** dispatch automation tasks — dispatch is only triggered by the
-dashboard contact-save, Step 3). Automations sit at their initial states until then.
+- **Side effect — initial dispatch (added 2026-07-31):** after the session closes,
+  `_dispatch_new_booking_tasks(booking.id)` runs `_dispatch_pending_tasks` for the new
+  booking. `CLEANER_SHEET_ADD` therefore runs here, matching CONTEXT.md's "immediately
+  on booking"; for a VRBO booking `ACCESS_CODE_CREATE` (PENDING, phone came in the
+  email) runs here too. Wrapped in try/except — non-fatal, since the booking is already
+  committed and a raise would abort the poll of later messages.
 
-> ⚠️ Consequence worth knowing for Step 16: **nothing dispatches the PENDING
-> `CLEANER_SHEET_ADD` until the owner saves contact info.** In a pure "inject email"
-> run, the cleaner row is not written until Step 3 fires `_dispatch_pending_tasks`.
-> The E2E/orchestration script must therefore perform the manual contact-save step to
-> exercise the automations.
+**State after Step 1:** booking ACTIVE. `CLEANER_SHEET_ADD` COMPLETE (the row is in the
+sheet). Everything still WAITING is waiting on a contact field the owner has to type in,
+which is Step 2.
+
+> Before 2026-07-31 the poller dispatched nothing, so the cleaner row was not written
+> until the dashboard contact-save (Step 3) or the next daily `requeue_stalled_automations`
+> sweep. An "inject email" run now exercises the cleaner sheet without the manual step.
 
 ---
 
@@ -249,8 +254,10 @@ one owner email summarizing the HOA + cleaner-sheet manual cleanups, and the two
 # Preconditions & manual setup for the Step 16 E2E run
 
 ### What to inject / how to drive it
-The E2E must include **the human contact-save step**, because the poller alone never
-dispatches automations (Step 1 ⚠️). Two viable drivers:
+The E2E must include **the human contact-save step**, because that is what supplies the
+guest email and (for Airbnb) the phone, and DocuSign and the door code stay WAITING
+without them. Since 2026-07-31 the poller dispatches at ingestion, so the cleaner-sheet
+row is written before that step. Two viable drivers:
 
 1. **`persist_booking` directly (recommended for the orchestration script).** Lets you
    set an **arbitrary check-in date** so you can deterministically hit either HOA branch

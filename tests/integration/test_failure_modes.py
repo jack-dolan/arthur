@@ -322,3 +322,59 @@ async def test_dispatch_survives_handler_that_aborts_the_transaction(db_session)
     assert ds.attempt_count == 1
     # Later tasks in the dispatch order still ran.
     assert tasks[TaskType.ACCESS_CODE_CREATE].state == TaskState.COMPLETE
+
+
+async def test_failing_handler_does_not_expire_booking_for_later_handlers(db_session):
+    """Step 12 item 0: a rollback expires EVERY attribute on the booking, not
+    just ``tasks``. The error path used to refresh only the ``tasks``
+    collection, so the NEXT handler crashed with ``MissingGreenlet`` the moment
+    it read any other column — observed in a preview container as
+    ``handle_hoa_email`` reading ``booking.signed_pdf_path`` one task after a
+    DocuSign failure. The damage is bogus FAILED rows whose ``last_error``
+    describes SQLAlchemy internals instead of the real cause.
+
+    A mocked session cannot catch this: ``refresh`` is a no-op there and no
+    attribute is ever expired. It needs a real session and a real rollback.
+    """
+    from app.tasks.dispatch import _dispatch_pending_tasks
+
+    booking = _booking(signed_pdf_path="/app/data/pdfs/fake.pdf")
+    booking.tasks.append(BookingTask(task_type=TaskType.DOCUSIGN_SEND, state=TaskState.PENDING))
+    booking.tasks.append(BookingTask(task_type=TaskType.HOA_EMAIL, state=TaskState.PENDING))
+    booking_id = await _seed(booking)
+
+    seen_pdf_path: list[str | None] = []
+
+    async def boom(bk, task, session):
+        # Touch the DB first, the way a real handler does before it calls out
+        # (recording provenance, re-reading a row). That query opens the
+        # transaction the error path then rolls back — and the rollback is what
+        # expires the instance. A handler that raises without ever issuing a
+        # statement leaves no transaction to roll back, so it does not
+        # reproduce the bug.
+        await session.execute(select(Booking.id).where(Booking.id == bk.id))
+        raise RuntimeError("docusign 500 / network timeout")
+
+    async def reads_a_booking_column(bk, task, session):
+        # Exactly what handle_hoa_email does first: read a column that is not
+        # `tasks`. Under the bug this raises MissingGreenlet.
+        seen_pdf_path.append(bk.signed_pdf_path)
+        task.state = TaskState.COMPLETE
+
+    with (
+        patch("app.tasks.dispatch.handle_docusign_send", boom),
+        patch("app.tasks.dispatch.handle_hoa_email", reads_a_booking_column),
+    ):
+        await _dispatch_pending_tasks(booking_id)
+
+    tasks = await _reload_tasks(booking_id)
+
+    # The second handler actually ran, and read a real value.
+    assert seen_pdf_path == ["/app/data/pdfs/fake.pdf"]
+    assert tasks[TaskType.HOA_EMAIL].state == TaskState.COMPLETE
+
+    # The first task's failure is its own, and it did not poison the second.
+    ds = tasks[TaskType.DOCUSIGN_SEND]
+    assert ds.state == TaskState.FAILED
+    assert "network timeout" in (ds.last_error or "")
+    assert tasks[TaskType.HOA_EMAIL].last_error is None

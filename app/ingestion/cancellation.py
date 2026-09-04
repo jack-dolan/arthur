@@ -53,12 +53,24 @@ log = logging.getLogger(__name__)
 
 # Airbnb: "Canceled: Reservation HMTEST0001 for Feb 23 – 27, 2026"
 # Also handles forwarded wrapping — the classifier already verified type.
-# The code group is deliberately strict (uppercase-only, at least one digit):
-# a fully case-insensitive pattern extracted the dictionary word "CANCELED"
-# from "Reservation canceled by guest" as a garbage id (F1b, bug hunt
-# 2026-07-22). A real code the strictness misses now dead-letters WITH an
-# owner alert rather than silently replaying, so strict is the safe side.
-_AIRBNB_CODE_RE = re.compile(r"(?i:Reservation)\s+((?=[A-Z0-9]*\d)[A-Z0-9]{8,})")
+#
+# The code group stays deliberately strict, because a fully case-insensitive
+# pattern extracted the dictionary word "CANCELED" from "Reservation canceled
+# by guest" as a garbage id (F1b, bug hunt 2026-07-22). What supplies the
+# strictness is the uppercase "HM" prefix that every Airbnb confirmation code
+# carries — NOT the presence of a digit. Requiring a digit was the original
+# fix, and on 2026-08-25 it dead-lettered a real cancellation whose code was
+# all letters; the code was in that email four more times and still went
+# unused. "CANCELED" fails the prefix test just as it failed the digit test.
+_AIRBNB_CODE_RE = re.compile(r"(?i:Reservation)\s+(HM[A-Z0-9]{6,})")
+
+# Fallback, tried only when the subject yields nothing. The same cancellation
+# email repeats the code in the host-facing reservation URL and in its prose
+# ("... had to cancel reservation HMXXXXXXXX for Sep 4 – 7"), so a change to
+# Airbnb's subject line alone can no longer lose it. Both patterns demand the
+# same HM prefix, so the fallback is no looser than the subject match.
+_AIRBNB_BODY_URL_RE = re.compile(r"/hosting/reservations/details/(HM[A-Z0-9]{6,})")
+_AIRBNB_BODY_RES = (_AIRBNB_BODY_URL_RE, _AIRBNB_CODE_RE)
 
 # VRBO: "Your reservation HA-TEST01 was canceled ..."
 _VRBO_ID_RE = re.compile(r"reservation\s+(HA-[A-Z0-9]+)", re.IGNORECASE)
@@ -86,7 +98,17 @@ def parse_cancellation_external_id(msg: Message, platform: Platform) -> str | No
 
     if platform == Platform.AIRBNB:
         m = _AIRBNB_CODE_RE.search(subject)
-        return m.group(1).upper() if m else None
+        if m:
+            return m.group(1).upper()
+        # Same local import as _get_effective_subject, for the same reason.
+        from app.ingestion.classifier import _get_text_body
+
+        body = _get_text_body(msg)
+        for pattern in _AIRBNB_BODY_RES:
+            m = pattern.search(body)
+            if m:
+                return m.group(1).upper()
+        return None
 
     if platform == Platform.VRBO:
         m = _VRBO_ID_RE.search(subject)
@@ -146,7 +168,7 @@ def send_cancellation_alert(booking: Booking) -> None:
     subject, body = build_cancellation_alert(booking, dashboard_base_url=dashboard_base_url)
 
     mime = MIMEText(body, "plain")
-    mime["To"] = config.email.alerts
+    mime["To"] = config.email.alerts_to_header
     mime["From"] = config.email.alerts
     mime["Subject"] = subject
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()

@@ -38,6 +38,17 @@ from app.db.models import (
 )
 
 
+def _email_config(extras: list[str] | None = None):
+    """A real EmailConfig, so the alerts To header is built by the model."""
+    from app.config import EmailConfig
+
+    return EmailConfig(
+        booking_feed="feed@example.com",
+        alerts="alerts@example.com",
+        alerts_additional_recipients=extras or [],
+    )
+
+
 def _make_booking_with_tasks(
     task_overrides: dict[TaskType, tuple[TaskState, str | None]] | None = None,
 ):
@@ -408,6 +419,32 @@ def test_void_docusign_envelope_signature_remains_sync():
 # Step 3: send_cancellation_alert real implementation (Gmail boundary mocked)
 # ---------------------------------------------------------------------------
 
+def test_send_cancellation_alert_reaches_every_additional_recipient():
+    """The co-owner is told about a cancellation too."""
+    import base64
+    import email as email_lib
+    from email import policy
+
+    from app.ingestion.cancellation import send_cancellation_alert
+
+    service = MagicMock()
+    service.users().messages().send().execute.return_value = {"id": "sent-cancel-2"}
+    config = MagicMock()
+    config.email = _email_config(extras=["second@example.com"])
+
+    with (
+        patch("app.ingestion.cancellation.get_alerts_service", return_value=service),
+        patch("app.ingestion.cancellation.load_config", return_value=config),
+    ):
+        send_cancellation_alert(_make_booking_with_tasks())
+
+    send_call = service.users.return_value.messages.return_value.send.call_args
+    raw = base64.urlsafe_b64decode(send_call.kwargs["body"]["raw"] + "==")
+    sent = email_lib.message_from_bytes(raw, policy=policy.default)
+    assert sent["To"] == "alerts@example.com, second@example.com"
+    assert sent["From"] == "alerts@example.com"
+
+
 def test_send_cancellation_alert_sends_via_gmail_alerts_service():
     """send_cancellation_alert builds the email and sends it via get_alerts_service().
 
@@ -422,7 +459,9 @@ def test_send_cancellation_alert_sends_via_gmail_alerts_service():
     service = MagicMock()
     service.users().messages().send().execute.return_value = {"id": "sent-cancel-1"}
     config = MagicMock()
-    config.email.alerts = "alerts@example.com"
+    # A REAL EmailConfig: the To header is built by the model, and a mock
+    # attribute would let that logic drift untested.
+    config.email = _email_config()
 
     with (
         patch("app.ingestion.cancellation.get_alerts_service", return_value=service) as mock_get,
@@ -505,14 +544,14 @@ async def test_apply_cancellation_reuses_existing_alert_task_rows():
 # ---------------------------------------------------------------------------
 
 
-def _cancel_msg(subject: str):
+def _cancel_msg(subject: str, body: str = "Some body text."):
     import email as email_lib
     from email import policy as email_policy
 
     raw = (
         "From: Airbnb <automated@airbnb.com>\r\n"
         f"Subject: {subject}\r\n"
-        "Content-Type: text/plain\r\n\r\nSome body text.\r\n"
+        f"Content-Type: text/plain\r\n\r\n{body}\r\n"
     )
     return email_lib.message_from_string(raw, policy=email_policy.default)
 
@@ -528,8 +567,9 @@ def test_airbnb_cancellation_code_not_extracted_from_lowercase_word():
 
 
 def test_airbnb_cancellation_code_not_extracted_from_allcaps_word():
-    """Even an ALL-CAPS subject must not treat a dictionary word as a code —
-    real Airbnb confirmation codes contain at least one digit."""
+    """Even an ALL-CAPS subject must not treat a dictionary word as a code.
+    The discriminator is the ``HM`` prefix that every Airbnb confirmation code
+    carries, NOT the presence of a digit — see the digit-free test below."""
     from app.ingestion.cancellation import parse_cancellation_external_id
 
     msg = _cancel_msg("RESERVATION CANCELED BY GUEST")
@@ -540,6 +580,61 @@ def test_airbnb_cancellation_real_code_still_extracted():
     from app.ingestion.cancellation import parse_cancellation_external_id
 
     msg = _cancel_msg("Canceled: Reservation HMFAKE0001 for Feb 23 - 27, 2026")
+    assert parse_cancellation_external_id(msg, Platform.AIRBNB) == "HMFAKE0001"
+
+
+# ---------------------------------------------------------------------------
+# Production 2026-08-25: a real Airbnb confirmation code with NO digit in it
+# dead-lettered a cancellation. The old pattern required a digit to tell a code
+# apart from the word "CANCELED"; the HM prefix does that job without excluding
+# a legitimate all-letter code.
+# ---------------------------------------------------------------------------
+
+
+def test_airbnb_cancellation_code_without_a_digit_is_extracted():
+    """Airbnb issues all-letter confirmation codes. One of them cancelled in
+    production and could not be applied, because the pattern demanded a digit."""
+    from app.ingestion.cancellation import parse_cancellation_external_id
+
+    msg = _cancel_msg("Canceled: Reservation HMFAKEZZZZ for September 4 - 7")
+    assert parse_cancellation_external_id(msg, Platform.AIRBNB) == "HMFAKEZZZZ"
+
+
+def test_airbnb_cancellation_code_read_from_body_when_subject_has_none():
+    """Defence in depth: the same email repeats the code in the host-facing
+    reservation URL, so a subject-format change alone must not lose it."""
+    from app.ingestion.cancellation import parse_cancellation_external_id
+
+    msg = _cancel_msg(
+        "Your reservation was canceled",
+        body=(
+            "RESERVATION CANCELED\n"
+            "https://www.airbnb.com/hosting/reservations/details/HMFAKEZZZZ"
+            "?email_cta=link_canceled_reservation_by_guest\n"
+        ),
+    )
+    assert parse_cancellation_external_id(msg, Platform.AIRBNB) == "HMFAKEZZZZ"
+
+
+def test_airbnb_cancellation_body_fallback_ignores_a_decoy_body():
+    """The body fallback must be as strict as the subject pattern."""
+    from app.ingestion.cancellation import parse_cancellation_external_id
+
+    msg = _cancel_msg(
+        "Your reservation was canceled",
+        body="RESERVATION CANCELED BY GUEST\nNo reservation identifier here.\n",
+    )
+    assert parse_cancellation_external_id(msg, Platform.AIRBNB) is None
+
+
+def test_airbnb_cancellation_subject_wins_over_the_body():
+    """When both carry a code the subject is authoritative."""
+    from app.ingestion.cancellation import parse_cancellation_external_id
+
+    msg = _cancel_msg(
+        "Canceled: Reservation HMFAKE0001 for Feb 23 - 27, 2026",
+        body="https://www.airbnb.com/hosting/reservations/details/HMFAKEZZZZ\n",
+    )
     assert parse_cancellation_external_id(msg, Platform.AIRBNB) == "HMFAKE0001"
 
 

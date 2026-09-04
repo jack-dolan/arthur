@@ -20,14 +20,25 @@ import logging
 
 import httpx
 
+from app.preview import is_preview_mode
+
 log = logging.getLogger(__name__)
 
 _PING_TIMEOUT_SECONDS = 10.0
 
 
 def ping_heartbeat(url: str, *, label: str) -> None:
-    """Send a heartbeat ping (sync). No-op when *url* is empty; never raises."""
+    """Send a heartbeat ping (sync). No-op when *url* is empty; never raises.
+
+    Also a no-op in preview mode: a heartbeat is an outbound HTTP call, and a
+    preview that pinged the production monitor would report a dead production
+    app as alive. Preview mode registers no jobs, so nothing should reach here
+    anyway — this is the belt-and-braces half.
+    """
     if not url:
+        return
+    if is_preview_mode():
+        log.warning("PREVIEW MODE: heartbeat ping suppressed (%s)", label)
         return
     try:
         response = httpx.get(url, timeout=_PING_TIMEOUT_SECONDS, follow_redirects=True)

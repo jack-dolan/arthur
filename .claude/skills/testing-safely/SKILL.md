@@ -100,7 +100,7 @@ normal mocking is unaffected.
 - Event-loop canary tests: schedule the canary coroutine **before** the
   coroutine under test in `asyncio.gather`, or the test may pass vacuously.
 
-## TDD flow (per CLAUDE.md, with the safety addition)
+## TDD flow (per the repo conventions doc, with the safety addition)
 
 1. Write the failing test — with side-effect seams explicitly patched.
 2. Run it RED; **read the failure**: it must fail on the assertion you

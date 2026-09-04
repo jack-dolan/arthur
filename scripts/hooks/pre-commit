@@ -154,7 +154,7 @@ def main() -> int:
             "   one literal term per line (blank lines and #-comments ignored):\n"
             "   the names, phone numbers and confirmation codes this repo must\n"
             "   never record.\n"
-            '   See CLAUDE.md, "Privacy rules".\n'
+            '   See the repo conventions doc, "Privacy rules".\n'
         )
 
     if not findings:
@@ -170,7 +170,7 @@ def main() -> int:
             sys.stderr.write(f"        + {echo(line)}\n")
         sys.stderr.write("\n")
     sys.stderr.write(
-        "Guest PII never enters git history — history is forever. See CLAUDE.md,\n"
+        "Guest PII never enters git history — history is forever. See the repo conventions doc,\n"
         '"Privacy rules", for the conventions that keep it out.\n\n'
         "If this is a deliberate, reviewed exception:\n"
         "    git commit --no-verify\n\n"

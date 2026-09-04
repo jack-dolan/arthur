@@ -13,6 +13,6 @@
 # Everything else runs at Squawk's defaults. Do not add entries here to silence
 # a finding about a specific migration: fix the DDL. An exclusion belongs here
 # only when the rule is wrong for this schema in general, with the reasoning
-# written above it. The offline-skip marker in CLAUDE.md is NOT an alternative
+# written above it. The offline-skip marker in the repo conventions doc is NOT an alternative
 # -- it is only for a revision that cannot be rendered offline at all.
 excluded_rules = ["prefer-text-field"]

@@ -13,6 +13,7 @@ from pathlib import Path
 import docusign_esign as ds
 import httpx
 
+from app.preview import inert_client, is_preview_mode
 from app.settings import settings
 
 log = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def _persist_refresh_token(new_token: str) -> None:
     1. In-memory settings — the running process uses it immediately.
     2. The durable store on /app/data (F4) — survives container restarts; this
        is what makes a restart >30 days after the last manual mint safe.
-    3. The repo-root .env where it exists (dev hosts; also keeps the CLAUDE.md
+    3. The repo-root .env where it exists (dev hosts; also keeps the the repo conventions doc
        migration procedure's "copy .env" step carrying a live token). Missing
        .env (the container case) logs at INFO — the store above has it covered.
 
@@ -219,7 +220,13 @@ def get_envelope_api() -> tuple[ds.EnvelopesApi, str]:
 
     Obtains a fresh access token via refresh-token exchange on every call.
     Tokens are never persisted (T-04-D2 mitigation).
+
+    In preview mode this returns an inert stub and an empty account id, without
+    exchanging a token: the httpx token exchange gates every DocuSign call, so
+    stopping here means no envelope can be sent or voided (app/preview.py).
     """
+    if is_preview_mode():
+        return inert_client("DocuSign"), ""
     _, api_host = _docusign_hosts()
     access_token = _refresh_access_token()
     api_client = ds.ApiClient()

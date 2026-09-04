@@ -360,6 +360,79 @@ async def test_detail_renders_hoa_pipeline_and_labels():
     assert "waiting on guest" in html
 
 
+async def _render_detail(booking) -> str:
+    """Render the detail page for *booking* with a stubbed property config."""
+    from unittest.mock import patch
+
+    mock_session = AsyncMock()
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = booking
+    mock_session.execute = AsyncMock(return_value=execute_result)
+    mock_session.refresh = AsyncMock()
+    override = await _override_get_db_factory(mock_session)
+
+    try:
+        _auth_override()
+        app.dependency_overrides[get_db] = override
+        with patch(
+            "app.routers.dashboard.load_config",
+            return_value=_detail_pipeline_config(),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.get(f"/bookings/{booking.id}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    return response.text
+
+
+def _past_window_booking(**kwargs):
+    """Booking whose HOA send window has closed but whose stay is still ahead.
+
+    Check-in tomorrow: with the stubbed 7-open-day config, `latest` is
+    check-in minus 3 days, so today is past it.
+    """
+    from datetime import timedelta
+
+    booking = _full_task_booking(**kwargs)
+    booking.check_in_date = date.today() + timedelta(days=1)
+    booking.check_out_date = booking.check_in_date + timedelta(days=3)
+    return booking
+
+
+async def test_detail_past_window_says_the_hoa_email_still_sends():
+    """A closed window is a missed deadline, not a cancelled send. Both send
+    paths (the DocuSign webhook and the hourly scan) send late on purpose
+    (owner adjudication 2026-07-22); the panel used to claim the opposite and
+    tell the owner to handle it by hand."""
+    booking = _past_window_booking(
+        guest_phone="5551234567", guest_email="guest@example.com"
+    )
+    booking.signed_pdf_path = None
+
+    html = await _render_detail(booking)
+
+    assert "will not auto-send" not in html
+    assert "handle manually" not in html
+    assert "sends late once the form is signed" in html
+
+
+async def test_detail_past_window_and_signed_says_sending_late():
+    """Signed after the deadline: the hourly scan picks it up within the hour."""
+    booking = _past_window_booking(
+        guest_phone="5551234567", guest_email="guest@example.com"
+    )
+    booking.signed_pdf_path = "/data/signed/fake.pdf"
+
+    html = await _render_detail(booking)
+
+    assert "will not auto-send" not in html
+    assert "sending late" in html
+
+
 async def test_detail_renders_without_pipeline_when_config_missing():
     """Config unavailable → the panel is omitted, page still renders."""
     from unittest.mock import patch

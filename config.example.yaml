@@ -9,6 +9,12 @@ owners:
 email:
   booking_feed: "your-booking-feed@example.com"   # Receives forwarded Airbnb/VRBO emails; system-only
   alerts: "your-alerts@example.com"               # Human-actionable notifications to both owners
+  # Anyone else who should receive every owner alert, added to the To header
+  # alongside the alerts mailbox. Optional; omit or leave empty for none.
+  # The From header is always the alerts mailbox, so replies come back to it.
+  # This does not affect the HOA email, which addresses the HOA and nobody else.
+  alerts_additional_recipients:
+    - "co-owner@example.com"
 
 dashboard:
   # Google accounts allowed to sign in to the owner dashboard (Sign in with
@@ -26,6 +32,12 @@ properties:
       email_window_days_min: 2          # Must email at least this many HOA-open days before check-in
       email_window_days_max: 7          # Must not email earlier than this many days before check-in
     cleaner_schedule:
+      # Master switch. false = the app never touches the spreadsheet at all:
+      # no row insert, no Sheets client, no credential use. Set it false when
+      # the cleaning company writes the row itself (two writers duplicate every
+      # row). The cleaner task still appears on the dashboard, marked "skipped".
+      # Nothing else in the booking workflow changes. Defaults to true if omitted.
+      enabled: true
       type: "google_sheets"
       spreadsheet_id: "your-google-sheets-spreadsheet-id-from-url"   # The ID in the sheet URL (NOT the tab name)
       sheet_name: "Your Cleaner Schedule Sheet Name"

@@ -52,9 +52,11 @@ from app.ingestion.alerts import (
     send_reminder_alert,
     send_stalled_automations_alert,
 )
+from app.integrations.claude.client import REVIEW_MODEL, get_anthropic_client
 from app.integrations.gmail.oauth import get_alerts_service, get_booking_feed_service
 from app.integrations.seam.client import get_seam_client
 from app.integrations.sheets.client import get_sheets_service
+from app.job_journal import JOB_INBOX_REVIEWER, read_runs_since
 from app.monitoring import ping_heartbeat_async
 from app.settings import settings
 from app.tasks.handlers.hoa import handle_hoa_email
@@ -304,6 +306,7 @@ async def _process_booking_reminders(booking: Booking, today_et: date) -> None:
                     booking,
                     alerts_service=alerts_service,
                     alerts_address=config.email.alerts,
+                    alerts_to=config.email.alerts_to_header,
                     dashboard_base_url=dashboard_base_url,
                     threshold_days=threshold,
                 )
@@ -431,6 +434,7 @@ async def refresh_docusign_token() -> None:
                 error=str(exc),
                 alerts_service=get_alerts_service(),
                 alerts_address=config.email.alerts,
+                alerts_to=config.email.alerts_to_header,
                 dashboard_base_url=f"https://{settings.domain}",
             )
         except Exception:  # noqa: BLE001 — alert failure must not kill the job
@@ -575,6 +579,7 @@ async def requeue_stalled_automations() -> None:
             items,
             alerts_service=get_alerts_service(),
             alerts_address=config.email.alerts,
+            alerts_to=config.email.alerts_to_header,
             dashboard_base_url=base_url,
         )
     except Exception:
@@ -591,6 +596,62 @@ async def requeue_stalled_automations() -> None:
 VERIFY_CODES_WITHIN_DAYS = 3
 
 
+def _device_state_label(on_device: object) -> str:
+    """Render Seam's ``is_scheduled_on_device`` for the owner's alert email.
+
+    Three states, not two: the field can be absent/null, and that is a
+    different fact from a definite "no".
+    """
+    if on_device is None:
+        return "not reported by Seam"
+    return "yes" if on_device else "NO"
+
+
+# Delays between retries of a read-only external probe. One entry per retry, so
+# three attempts in total. Patched to zeros in tests.
+#
+# Why this exists (2026-07-29): `access_codes.get` raised "remote end closed
+# connection without response" on a single run, and the owner received an email
+# headed "Door access code problem — check the lock" about a code that was on
+# the lock with the right PIN and window the whole time. The next morning's run
+# reported it healthy. A dropped connection says nothing about the lock, and a
+# false alarm here is expensive: it trains the owner to ignore the one real one,
+# which is the exact failure this job's own docstring warns about.
+TRANSIENT_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (1.0, 3.0)
+
+
+async def _read_with_retry(func, *args, label: str, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN201
+    """Run a READ-ONLY sync callable off the event loop, retrying failures.
+
+    Every exception is retried rather than classified. Two reasons: the callers
+    are all reads, so a repeat call has no side effect to worry about; and the
+    exception types worth distinguishing arrive from three layers (the Seam SDK,
+    its HTTP client, and the socket layer below both), so a classifier here would
+    be a guess that silently stops matching on the next dependency bump. Retrying
+    a genuine 404 or a dead credential costs four wasted seconds once a day.
+
+    NOT for anything with a side effect. The DocuSign keep-alive, in particular,
+    rotates the refresh token on every exchange and must stay a single attempt.
+    """
+    attempts = len(TRANSIENT_RETRY_BACKOFF_SECONDS) + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            # F11: sync network I/O never runs on the event loop.
+            return await asyncio.to_thread(func, *args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 — see the docstring
+            if attempt == attempts:
+                log.warning(
+                    "%s failed on all %d attempt(s): %s", label, attempts, exc
+                )
+                raise
+            delay = TRANSIENT_RETRY_BACKOFF_SECONDS[attempt - 1]
+            log.warning(
+                "%s failed (attempt %d/%d): %s — retrying in %.1fs",
+                label, attempt, attempts, exc, delay,
+            )
+            await asyncio.sleep(delay)
+
+
 async def verify_access_codes() -> None:
     """Daily job: confirm upcoming bookings' codes actually exist on the lock.
 
@@ -604,7 +665,16 @@ async def verify_access_codes() -> None:
     Seam and flag:
       - any reported errors on the code object,
       - a fetch failure (code deleted / 404 / API error),
-      - status != "set" within 1 day of check-in (the guest is imminent).
+      - within 1 day of check-in, a code Seam has not put on the lock.
+
+    The last one keys on ``is_scheduled_on_device``, NOT on ``status``.
+    ``status`` says whether a code is active *right now*; ``is_scheduled_on_device``
+    says whether it reached the lock. For every booking this job looks at they
+    disagree by design: a time-bound code's window opens at 4 PM on check-in
+    day and this job runs in the morning, so a perfectly healthy code always
+    reads ``status='unset'``. Keying on it alerted on every booking, twice
+    (the morning before check-in and the morning of), which is a false alarm
+    that trains the owner to ignore the one real one.
 
     Alert-only: never mutates task state. Daily repetition while a problem
     persists is deliberate.
@@ -642,32 +712,67 @@ async def verify_access_codes() -> None:
             "guest": guest,
             "check_in": booking.check_in_date.strftime("%b %-d, %Y"),
             "booking_url": f"{base_url}/bookings/{booking.id}",
+            # Findings are lock problems by default; only the could-not-reach-Seam
+            # branch below overrides this, and the alert wording follows it.
+            "kind": "lock",
         }
         try:
-            code = await asyncio.to_thread(
-                client.access_codes.get, access_code_id=task.external_ref
+            code = await _read_with_retry(
+                client.access_codes.get,
+                access_code_id=task.external_ref,
+                label=f"verify_access_codes: Seam fetch for booking {booking.id}",
             )
-        except Exception as exc:  # noqa: BLE001 — a fetch failure IS the finding
+        except Exception as exc:  # noqa: BLE001 — a fetch failure IS still a finding
+            # Reaching here means every attempt failed. Report it, because
+            # silence is the wrong failure mode for a safety net — but report it
+            # as what it is. The code itself may be perfectly fine; this says
+            # only that Seam could not be asked.
             problems.append(
-                {**entry, "status": "unknown", "problem": f"could not fetch code: {exc}"}
+                {
+                    **entry,
+                    "device_state": "unknown — Seam could not be reached",
+                    "problem": (
+                        f"the Seam API did not respond after "
+                        f"{len(TRANSIENT_RETRY_BACKOFF_SECONDS) + 1} attempts: {exc}"
+                    ),
+                    "kind": "api_unreachable",
+                }
             )
             continue
 
         status = str(getattr(code, "status", "unknown"))
         errors = list(getattr(code, "errors", None) or [])
+        # None is a real possibility, not defensive padding: Seam returns null
+        # for other bool-typed fields on this same object. It must NOT collapse
+        # into False — "Seam said no" and "Seam said nothing" need different
+        # wording, or an API change reads as a lock fault forever.
+        on_device = getattr(code, "is_scheduled_on_device", None)
         imminent = (booking.check_in_date - today).days <= 1
 
         if errors:
             problems.append(
-                {**entry, "status": status, "problem": f"Seam reports errors: {errors}"}
+                {
+                    **entry,
+                    "device_state": _device_state_label(on_device),
+                    "problem": f"Seam reports errors: {errors} (status={status})",
+                }
             )
-        elif imminent and status != "set":
+        elif imminent and on_device is None:
             problems.append(
                 {
                     **entry,
-                    "status": status,
-                    "problem": "code not confirmed on the device and check-in "
-                    "is within a day",
+                    "device_state": _device_state_label(on_device),
+                    "problem": "Seam did not report whether the code is on the "
+                    "lock, so it cannot be confirmed before check-in",
+                }
+            )
+        elif imminent and not on_device:
+            problems.append(
+                {
+                    **entry,
+                    "device_state": _device_state_label(on_device),
+                    "problem": "Seam has not programmed the code onto the lock "
+                    "(not on the lock) and check-in is within a day",
                 }
             )
 
@@ -683,6 +788,7 @@ async def verify_access_codes() -> None:
             problems,
             alerts_service=get_alerts_service(),
             alerts_address=config.email.alerts,
+            alerts_to=config.email.alerts_to_header,
             dashboard_base_url=base_url,
         )
     except Exception:
@@ -785,12 +891,28 @@ def _check_dashboard_oauth_client() -> None:
         )
 
 
+def _check_anthropic() -> None:
+    """Prove the Claude API key still works (a free metadata read, no tokens).
+
+    Retrieving the exact model the weekly inbox reviewer runs on checks two
+    things at once: the key is alive, and the model still exists. A model
+    retirement would otherwise surface as a weekly job that quietly stopped
+    producing verdicts.
+
+    An unset key fails this check on purpose. The reviewer cannot run without
+    it, and a key that was deleted looks identical from here to one that was
+    never set — treating "absent" as "fine" is how a safety net goes quiet.
+    """
+    get_anthropic_client().models.retrieve(REVIEW_MODEL)
+
+
 _CREDENTIAL_CHECKS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("gmail_booking_feed", _check_gmail_booking_feed),
     ("gmail_alerts", _check_gmail_alerts),
     ("google_sheets", _check_google_sheets),
     ("seam", _check_seam),
     ("dashboard_oauth_client", _check_dashboard_oauth_client),
+    ("anthropic", _check_anthropic),
 )
 
 
@@ -806,8 +928,10 @@ async def verify_credentials() -> None:
     failures: list[dict] = []
     for name, check in _CREDENTIAL_CHECKS:
         try:
-            # F11: every probe is sync network I/O — keep it off the event loop.
-            await asyncio.to_thread(check)
+            # Retried: every probe is a read, and a dropped connection is not a
+            # dead credential. Without this a single blip skips the heartbeat and
+            # emails the owner about a credential that is fine.
+            await _read_with_retry(check, label=f"verify_credentials: {name} probe")
         except Exception as exc:  # noqa: BLE001 — the failure IS the finding
             log.exception("verify_credentials: %s check FAILED", name)
             failures.append({"credential": name, "error": str(exc)})
@@ -829,6 +953,7 @@ async def verify_credentials() -> None:
             failures=failures,
             alerts_service=get_alerts_service(),
             alerts_address=config.email.alerts,
+            alerts_to=config.email.alerts_to_header,
             dashboard_base_url=f"https://{settings.domain}",
         )
     except Exception:  # noqa: BLE001 — if the alerts token died, this is expected
@@ -916,6 +1041,7 @@ async def check_classifier_drift() -> None:
             items=items,
             alerts_service=get_alerts_service(),
             alerts_address=config.email.alerts,
+            alerts_to=config.email.alerts_to_header,
             dashboard_base_url=f"https://{settings.domain}",
         )
         log.info("check_classifier_drift: digest sent (%d suspect emails)", len(items))
@@ -993,6 +1119,15 @@ async def _gather_monthly_stats() -> dict:
     except Exception:  # noqa: BLE001 — stats must not kill the report
         log.exception("_gather_monthly_stats: token store check failed")
 
+    # The weekly inbox reviewer emails only when it finds something, so its own
+    # silence proves nothing. These two numbers are where "it is still running"
+    # is visible; a zero is the tell.
+    reviewer_runs: list[dict] = []
+    try:
+        reviewer_runs = read_runs_since(JOB_INBOX_REVIEWER, cutoff_30d)
+    except Exception:  # noqa: BLE001 — stats must not kill the report
+        log.exception("_gather_monthly_stats: inbox-reviewer journal read failed")
+
     return {
         "active_bookings": active,
         "completed_last_30d": completed,
@@ -1001,6 +1136,10 @@ async def _gather_monthly_stats() -> dict:
         "dead_letters_other_30d": dead_other,
         "dead_letters_error_30d": dead_error,
         "docusign_token_store_age_days": token_age_days,
+        "inbox_reviewer_runs_30d": len(reviewer_runs),
+        "inbox_reviewer_emails_30d": sum(
+            int(run.get("reviewed", 0) or 0) for run in reviewer_runs
+        ),
     }
 
 
@@ -1020,6 +1159,7 @@ async def send_monthly_status_email() -> None:
             stats=stats,
             alerts_service=get_alerts_service(),
             alerts_address=config.email.alerts,
+            alerts_to=config.email.alerts_to_header,
             dashboard_base_url=f"https://{settings.domain}",
         )
         log.info("send_monthly_status_email: report sent")

@@ -187,6 +187,7 @@ async def docusign_webhook(request: Request) -> Response:
                 payload_keys=payload_keys,
                 alerts_service=get_alerts_service(),
                 alerts_address=config.email.alerts,
+                alerts_to=config.email.alerts_to_header,
                 dashboard_base_url=f"https://{settings.domain}",
             )
         except Exception:

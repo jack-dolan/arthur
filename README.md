@@ -1,5 +1,8 @@
 # Home Rental Automation
 
+The service answers to **Arthur**, a backronym for *A Robot That Handles
+Unglamorous Responsibilities*.
+
 A self-hosted Python service that covers everything between a booking being
 confirmed and the guest walking in the door, for a short-term rental listed on
 Airbnb and VRBO.
@@ -180,10 +183,10 @@ with instructions and stops there.
 
 | Layer | Choice |
 |---|---|
-| Language | Python 3.12 |
+| Language | Python 3.14 |
 | Web | FastAPI + Jinja2 templates, hand-written CSS, no build step |
 | Database | PostgreSQL 17 via SQLAlchemy 2 async |
-| Migrations | Alembic, applied on container start |
+| Migrations | Alembic, applied by an explicit deploy step |
 | Scheduler | APScheduler, in-process |
 | Auth | Google OIDC (Authlib) + signed session cookie + config allowlist |
 | Tests | pytest + pytest-asyncio |
@@ -248,6 +251,38 @@ unknown to an older rollback image warns and starts; a known older revision
 refuses and names the migrations the deploy skipped. The lifespan credential
 guard then refuses to boot on a missing credential, a placeholder
 `SECRET_KEY`, or an unconfigured `DATABASE_URL`, naming the offending field.
+
+### Preview mode
+
+`PREVIEW_MODE=1` boots a demonstration copy that cannot touch the outside
+world. It exists because a second ordinary instance is genuinely dangerous:
+this app owns a shared booking inbox and a physical door lock, so two of them
+double-send envelopes and email. Making a demo copy safe by remembering to
+blank the credentials is not a safety property; removing the capability is.
+
+What the switch does:
+
+- registers **no** scheduler jobs — no poller, no keep-alives, no digests
+- returns an inert stub from every outbound client factory, at the same
+  construction choke point the test suite's live-API guard blocks, so a call
+  raises with an explanatory message instead of reaching Gmail, DocuSign, Seam
+  or Sheets
+- **refuses to start** unless the whole environment looks like a preview: every
+  credential must be empty or carry an obvious placeholder marker, and
+  `DATABASE_URL` must name a throwaway database. A copy-pasted production
+  environment cannot boot as a preview
+- seeds four obviously-fake demo bookings — `<First> Example` names, 555
+  numbers, `HMFAKE0001` confirmation codes — covering the happy path, the two
+  missing-contact-detail paths and a cancellation
+- suppresses heartbeat pings, so a demo cannot report a dead production as alive
+- grants a fixed demo identity in place of Google sign-in, which placeholder
+  OAuth credentials could never complete, and shows a `PREVIEW` banner on every
+  page
+
+It was proven by running the image on a Docker network with no route to the
+internet: the app boots, the dashboard renders its fake bookings, and the one
+action that would normally send an e-signature envelope records
+`Blocked an outbound DocuSign call in preview mode` against the task instead.
 
 Moving to a new host is `pg_dump`, copy the repo plus `.env`, `config.yaml` and
 the backup files, start PostgreSQL, restore, run the explicit migration
@@ -329,8 +364,6 @@ scripts/          backup, restore, off-site backup, manual drivers, git hooks
 
 ## Further reading
 
-- [`CLAUDE.md`](CLAUDE.md), development conventions, TDD rules, and the domain
-  invariants that must not be broken in code
 - [`CONTEXT.md`](CONTEXT.md), domain glossary and task graph
 - [`TESTING.md`](TESTING.md), suite layout and offline vs live selection
 - [`docs/operations.md`](docs/operations.md), deploy, back up, migrate, monitor

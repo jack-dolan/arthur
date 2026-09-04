@@ -215,7 +215,7 @@ def main(argv: list[str]) -> int:
         return 0
     print("RESULT: FAIL -- %d value(s) are not placeholders." % total)
     print("        Replace them with the reserved ranges listed at the top of")
-    print("        this script; see CLAUDE.md for the conventions.")
+    print("        this script; see the repository's own testing conventions.")
     return 1
 
 

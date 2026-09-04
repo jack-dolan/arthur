@@ -69,3 +69,39 @@ def test_build_monthly_status_report_handles_missing_token_store():
     )
     # Must render without raising and still surface the attention items.
     assert "2" in body and "1" in body
+
+
+# ---------------------------------------------------------------------------
+# Inbox reviewer liveness line (added 2026-07-30)
+# ---------------------------------------------------------------------------
+
+
+def test_monthly_report_states_the_inbox_reviewer_ran():
+    """The reviewer is silent on a clean week by design, so its own inbox gives
+    no evidence it is alive. This line is that evidence."""
+    from app.ingestion.alerts import build_monthly_status_report
+
+    _, body = build_monthly_status_report(
+        stats={"inbox_reviewer_runs_30d": 4, "inbox_reviewer_emails_30d": 11},
+        dashboard_base_url="https://arthur.example",
+    )
+
+    assert "Inbox reviewer" in body
+    assert "4 run(s)" in body
+    assert "11 email(s)" in body
+
+
+def test_monthly_report_calls_out_a_reviewer_that_never_ran():
+    """Zero runs must read as a problem, not as a quiet month. Four weekly runs
+    are expected in any 30-day window."""
+    from app.ingestion.alerts import build_monthly_status_report
+
+    subject, body = build_monthly_status_report(
+        stats={"inbox_reviewer_runs_30d": 0, "inbox_reviewer_emails_30d": 0},
+        dashboard_base_url="https://arthur.example",
+    )
+
+    assert "0 run(s)" in body
+    lowered = body.lower()
+    assert "did not run" in lowered
+    assert "needs attention" in subject.lower()

@@ -20,7 +20,7 @@ New-task-type checklist:
       compatibility review is still semantic: the previous release must
       tolerate rows containing the new value.
 - [ ] The revision opens with the two timeout statements every new revision
-      needs (`SET lock_timeout` / `SET statement_timeout`; see CLAUDE.md's
+      needs (`SET lock_timeout` / `SET statement_timeout`; see the repo conventions doc's
       Database migrations section). CI's migration lint fails without them.
 - [ ] Created in _initial_tasks (app/ingestion/poller.py) with the right
       initial state, or created on demand at its trigger point
@@ -56,7 +56,7 @@ New code still adds the normal human `TASK_LABELS` entry and group/handler
 registration. The fallback exists for rollback, not as a substitute for
 finishing the new release's UI.
 
-All workflow migrations follow the database-migration section in `CLAUDE.md`:
+All workflow migrations follow the database-migration section in `the repo conventions doc`:
 N-1 compatibility, explicit deploy-time migration, immutable applied history,
 expand/contract for breaking changes, and the documented offline-render skip
 marker only when a revision genuinely cannot render.
@@ -118,6 +118,6 @@ class — when in doubt, alert.
 
 ## Docs and closeout
 
-TDD per CLAUDE.md (failing test first — read the `testing-safely` skill
+TDD per the repo conventions doc (failing test first — read the `testing-safely` skill
 before writing tests). If the change contradicts CONTEXT.md or an ADR,
 update the doc in the same change. Session Log entry on completion.

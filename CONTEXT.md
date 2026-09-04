@@ -95,6 +95,8 @@ HOA email details:
 ## Cleaner Schedule
 A Google Sheet shared with the cleaning team. Each booking adds one row. Sheet name is configured per property in `config.yaml` → `properties[n].cleaner_schedule.sheet_name`. Owned by the cleaning company; shared with the owners.
 
+**As of 2026-08-02 this automation is OFF in production** (`cleaner_schedule.enabled: false`). The cleaning company runs its own script that watches the Airbnb and VRBO booking calendars and adds the row itself, so the app writing one too would duplicate every row. The app therefore makes no request to the spreadsheet at all; the `cleaner_sheet_add` task is created and left `SKIPPED`. Everything else in the workflow (DocuSign, Seam access codes, the HOA email, alerts and reminders) is unaffected. Re-enabling is a one-word config change: the spreadsheet id, sheet name and sentinel pattern are all still configured and the code and tests are all still in place.
+
 **Columns (system writes only the starred ones):**
 | Column | System Writes? | Default / Format |
 |---|---|---|
@@ -124,7 +126,7 @@ Post-V1 (on roadmap): full admin UI with task override/trigger capability and **
 ## Email Addresses (System-Managed)
 Two dedicated Gmail accounts serve distinct roles:
 - **Booking Feed Inbox**: Receives auto-forwarded Airbnb/VRBO booking confirmation emails and guest reply emails. This is a system-only input — not monitored by humans.
-- **Alerts Inbox**: Receives human-actionable notifications sent to both owners. Each alert includes: the pre-drafted message text to send, the guest's name and stay dates for context, and the platform routing instruction (e.g., "paste this into Airbnb in the conversation with Bob M.").
+- **Alerts Inbox**: Receives human-actionable notifications sent to both owners. It is both the sender and a recipient of every owner alert: the `From` header is always this mailbox, so replies come back to it, and the `To` header is this mailbox plus every address in `config.yaml` -> `email.alerts_additional_recipients`, which is how a second person gets the same alerts on their own phone. This does not apply to the HOA email, which addresses the HOA alone. Each alert includes: the pre-drafted message text to send, the guest's name and stay dates for context, and the platform routing instruction (e.g., "paste this into Airbnb in the conversation with Bob M.").
 
 ## Access Code
 A time-bound door code programmed into the Schlage smart lock via the Seam API. Derived from the last 4 digits of the guest's phone number. Active from **4:00 PM on check-in day** to **11:00 AM on checkout day**.

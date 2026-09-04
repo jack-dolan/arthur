@@ -218,6 +218,7 @@ def _make_config(
     sheet_name="Cleaner Schedule",
     property_id="prop-1",
     sentinel_pattern=None,
+    enabled=None,
 ):
     """Build a minimal mock AppConfig with one property."""
     from app.config import (
@@ -234,6 +235,8 @@ def _make_config(
     )
     if sentinel_pattern is not None:
         schedule_kwargs["sentinel_pattern"] = sentinel_pattern
+    if enabled is not None:
+        schedule_kwargs["enabled"] = enabled
 
     return AppConfig(
         owners=OwnersConfig(primary_name="Owner", cohost_name="Cohost"),
@@ -584,3 +587,77 @@ async def test_cleaner_sheet_mutations_serialize_on_module_lock():
             await handler
 
     assert service_called["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# cleaner_schedule.enabled = false — the kill switch (2026-08-02)
+#
+# The cleaning company's own script now writes the row, so this automation is
+# off in production. The handler is the authoritative guard rather than the
+# task-creation site, because a CLEANER_SHEET_ADD row can also reach it from
+# the daily requeue job and from a dashboard retry, both of which bypass
+# _initial_tasks entirely.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_handle_cleaner_sheet_skips_when_disabled():
+    """A disabled property marks the task SKIPPED instead of writing a row."""
+    from app.db.models import TaskState
+
+    booking = _make_booking()
+    task = _make_task()
+    session = AsyncMock()
+    config = _make_config(enabled=False)
+
+    with (
+        patch("app.tasks.handlers.cleaner_sheet.get_sheets_service") as mock_get_service,
+        patch("app.tasks.handlers.cleaner_sheet.load_config", return_value=config),
+    ):
+        from app.tasks.handlers.cleaner_sheet import handle_cleaner_sheet
+        await handle_cleaner_sheet(booking, task, session)
+
+    assert task.state == TaskState.SKIPPED
+    # The whole point: no Sheets client is even constructed, so no credential
+    # is used and no request can reach the spreadsheet.
+    mock_get_service.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_cleaner_sheet_disabled_leaves_task_terminal_not_in_progress():
+    """The handler must not strand the task IN_PROGRESS on the disabled path.
+
+    Nothing re-dispatches IN_PROGRESS, so an early return that forgot to set a
+    terminal state would hang the booking's progress forever.
+    """
+    from app.db.models import TaskState
+
+    task = _make_task()
+    config = _make_config(enabled=False)
+
+    with (
+        patch("app.tasks.handlers.cleaner_sheet.get_sheets_service"),
+        patch("app.tasks.handlers.cleaner_sheet.load_config", return_value=config),
+    ):
+        from app.tasks.handlers.cleaner_sheet import handle_cleaner_sheet
+        await handle_cleaner_sheet(_make_booking(), task, AsyncMock())
+
+    assert task.state != TaskState.IN_PROGRESS
+    assert task.state in (TaskState.SKIPPED,)
+
+
+@pytest.mark.asyncio
+async def test_handle_cleaner_sheet_still_writes_when_enabled():
+    """The kill switch must not break the normal path — enabled still inserts."""
+    booking = _make_booking()
+    task = _make_task()
+    mock_service = _make_mock_service()
+    config = _make_config(enabled=True)
+
+    with (
+        patch("app.tasks.handlers.cleaner_sheet.get_sheets_service", return_value=mock_service),
+        patch("app.tasks.handlers.cleaner_sheet.load_config", return_value=config),
+    ):
+        from app.tasks.handlers.cleaner_sheet import handle_cleaner_sheet
+        await handle_cleaner_sheet(booking, task, AsyncMock())
+
+    assert mock_service.spreadsheets().batchUpdate.call_args_list, "expected a row insert"

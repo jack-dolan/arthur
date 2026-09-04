@@ -1256,10 +1256,21 @@ def _code_booking(days_to_checkin: int, *, ref: str = "ac-verify-1") -> Booking:
     return b
 
 
-def _seam_code(status: str = "set", errors=None):
+def _seam_code(status: str = "unset", errors=None, is_scheduled_on_device=True):
+    """A Seam access code.
+
+    Defaults describe a HEALTHY future booking, which is the case that matters:
+    a time-bound code that Seam has programmed onto the lock but whose window
+    has not opened yet reports ``status='unset'`` with
+    ``is_scheduled_on_device=True``. ``status`` answers "is this code active
+    right now", not "did it reach the lock", so it is never 'set' for a booking
+    this job looks at (the window opens at 4 PM on check-in day; the job runs
+    in the morning).
+    """
     code = MagicMock()
     code.status = status
     code.errors = errors or []
+    code.is_scheduled_on_device = is_scheduled_on_device
     return code
 
 
@@ -1268,7 +1279,7 @@ async def test_verify_access_codes_healthy_code_no_alert(db_session):
 
     await _seed(_code_booking(2))
     client = MagicMock()
-    client.access_codes.get.return_value = _seam_code("set")
+    client.access_codes.get.return_value = _seam_code()
 
     with (
         patch("app.tasks.scheduled.get_seam_client", return_value=client),
@@ -1302,14 +1313,40 @@ async def test_verify_access_codes_alerts_on_seam_errors(db_session):
     assert any("failed_to_set_on_device" in i["problem"] for i in items)
 
 
-async def test_verify_access_codes_alerts_when_not_set_on_final_day(db_session):
-    """Within 1 day of check-in, anything other than status='set' is a problem
-    — the guest arrives at 4 PM."""
+async def test_verify_access_codes_scheduled_but_inactive_code_never_alerts(db_session):
+    """THE false-positive guard. One day before check-in a healthy time-bound
+    code still reads status='unset', because its window does not open until
+    4 PM on check-in day. It is on the lock, and Seam says so via
+    is_scheduled_on_device. Alerting here cries wolf on EVERY booking, twice.
+    """
     from app.tasks import scheduled
 
     await _seed(_code_booking(1))
     client = MagicMock()
-    client.access_codes.get.return_value = _seam_code("setting")
+    client.access_codes.get.return_value = _seam_code(
+        status="unset", is_scheduled_on_device=True
+    )
+
+    with (
+        patch("app.tasks.scheduled.get_seam_client", return_value=client),
+        patch("app.tasks.scheduled.send_access_code_problem_alert") as mock_alert,
+        patch("app.tasks.scheduled.get_alerts_service", return_value=MagicMock()),
+    ):
+        await scheduled.verify_access_codes()
+
+    mock_alert.assert_not_called()
+
+
+async def test_verify_access_codes_alerts_when_not_on_device_on_final_day(db_session):
+    """The real failure this job exists to catch: check-in is imminent and Seam
+    has NOT programmed the code onto the lock."""
+    from app.tasks import scheduled
+
+    await _seed(_code_booking(1))
+    client = MagicMock()
+    client.access_codes.get.return_value = _seam_code(
+        status="unset", is_scheduled_on_device=False
+    )
 
     with (
         patch("app.tasks.scheduled.get_seam_client", return_value=client),
@@ -1319,6 +1356,57 @@ async def test_verify_access_codes_alerts_when_not_set_on_final_day(db_session):
         await scheduled.verify_access_codes()
 
     mock_alert.assert_called_once()
+    items = mock_alert.call_args.args[0]
+    assert any("not on the lock" in i["problem"].lower() for i in items)
+
+
+async def test_verify_access_codes_alerts_when_device_state_not_reported(db_session):
+    """Seam omits typed booleans sometimes (other fields on the same object come
+    back None). 'Seam did not tell us' must alert — silence is the wrong failure
+    mode for a safety net — but with wording distinct from a definite 'no', so a
+    future API change is diagnosable instead of looking like a lock fault."""
+    from app.tasks import scheduled
+
+    await _seed(_code_booking(1))
+    client = MagicMock()
+    client.access_codes.get.return_value = _seam_code(
+        status="unset", is_scheduled_on_device=None
+    )
+
+    with (
+        patch("app.tasks.scheduled.get_seam_client", return_value=client),
+        patch("app.tasks.scheduled.send_access_code_problem_alert") as mock_alert,
+        patch("app.tasks.scheduled.get_alerts_service", return_value=MagicMock()),
+    ):
+        await scheduled.verify_access_codes()
+
+    mock_alert.assert_called_once()
+    items = mock_alert.call_args.args[0]
+    assert any("did not report" in i["problem"].lower() for i in items)
+
+
+async def test_verify_access_codes_not_yet_on_device_is_fine_when_not_imminent(
+    db_session,
+):
+    """Seam programs the lock roughly 72h before the window opens, so a code
+    that is not on the device 2 days out is expected, not a fault. The imminent
+    gate is what keeps this job quiet until the push is genuinely overdue."""
+    from app.tasks import scheduled
+
+    await _seed(_code_booking(2))
+    client = MagicMock()
+    client.access_codes.get.return_value = _seam_code(
+        status="unset", is_scheduled_on_device=False
+    )
+
+    with (
+        patch("app.tasks.scheduled.get_seam_client", return_value=client),
+        patch("app.tasks.scheduled.send_access_code_problem_alert") as mock_alert,
+        patch("app.tasks.scheduled.get_alerts_service", return_value=MagicMock()),
+    ):
+        await scheduled.verify_access_codes()
+
+    mock_alert.assert_not_called()
 
 
 async def test_verify_access_codes_skips_far_future_bookings(db_session):
@@ -1533,3 +1621,140 @@ async def test_monthly_status_email_sends_report_with_stats(db_session):
         "docusign_token_store_age_days",
     ):
         assert key in stats
+
+
+# ---------------------------------------------------------------------------
+# A transient Seam failure is not a lock problem (2026-07-30)
+# ---------------------------------------------------------------------------
+#
+# Real incident, 2026-07-29 09:00 ET: one `access_codes.get` raised "remote end
+# closed connection without response" and the owner got an email headed "Door
+# access code problem — check the lock" about a code that was on the lock, with
+# the right PIN and the right window, the whole time. The next day's run
+# reported the same code healthy. A single-attempt fetch treated a dropped
+# connection as a finding, which is the false-alarm class this job's docstring
+# already warns about for a different field.
+
+
+async def test_verify_access_codes_retries_a_dropped_connection_and_stays_quiet(
+    db_session,
+):
+    """THE regression test for the 2026-07-29 false alarm."""
+    from app.tasks import scheduled
+
+    await _seed(_code_booking(2))
+    client = MagicMock()
+    client.access_codes.get.side_effect = [
+        ConnectionError("remote end closed connection without response"),
+        _seam_code(),
+    ]
+
+    with (
+        patch("app.tasks.scheduled.TRANSIENT_RETRY_BACKOFF_SECONDS", (0.0, 0.0)),
+        patch("app.tasks.scheduled.get_seam_client", return_value=client),
+        patch("app.tasks.scheduled.send_access_code_problem_alert") as mock_alert,
+        patch("app.tasks.scheduled.get_alerts_service", return_value=MagicMock()),
+    ):
+        await scheduled.verify_access_codes()
+
+    assert client.access_codes.get.call_count == 2, "the fetch must be retried"
+    mock_alert.assert_not_called()
+
+
+async def test_verify_access_codes_alerts_when_seam_is_unreachable_throughout(
+    db_session,
+):
+    """Give up eventually — but say it was the API, not the lock."""
+    from app.tasks import scheduled
+
+    await _seed(_code_booking(2))
+    client = MagicMock()
+    client.access_codes.get.side_effect = ConnectionError(
+        "remote end closed connection without response"
+    )
+
+    with (
+        patch("app.tasks.scheduled.TRANSIENT_RETRY_BACKOFF_SECONDS", (0.0, 0.0)),
+        patch("app.tasks.scheduled.get_seam_client", return_value=client),
+        patch("app.tasks.scheduled.send_access_code_problem_alert") as mock_alert,
+        patch("app.tasks.scheduled.get_alerts_service", return_value=MagicMock()),
+    ):
+        await scheduled.verify_access_codes()
+
+    assert client.access_codes.get.call_count == 3
+    mock_alert.assert_called_once()
+    item = mock_alert.call_args.args[0][0]
+    assert item["kind"] == "api_unreachable", (
+        "the alert must distinguish an unreachable API from a bad code, or the "
+        "email tells the owner to check a lock that is fine"
+    )
+    assert "seam" in item["device_state"].lower()
+    assert "remote end closed connection" in item["problem"]
+
+
+async def test_verify_access_codes_marks_real_findings_as_lock_problems(db_session):
+    """The genuine finding keeps its kind, so the email keeps its urgency."""
+    from app.tasks import scheduled
+
+    await _seed(_code_booking(1))
+    client = MagicMock()
+    client.access_codes.get.return_value = _seam_code(
+        status="unset", is_scheduled_on_device=False
+    )
+
+    with (
+        patch("app.tasks.scheduled.get_seam_client", return_value=client),
+        patch("app.tasks.scheduled.send_access_code_problem_alert") as mock_alert,
+        patch("app.tasks.scheduled.get_alerts_service", return_value=MagicMock()),
+    ):
+        await scheduled.verify_access_codes()
+
+    item = mock_alert.call_args.args[0][0]
+    assert item["kind"] == "lock"
+
+
+# ===========================================================================
+# LLM inbox reviewer — the row query only (the judgment is unit-tested)
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_reviewer_gathers_the_same_population_as_the_non_ai_digest(db_session):
+    """Both jobs must look at the same emails. If they drift apart, the digest
+    stops being a backstop for the reviewer and starts being a different report."""
+    from app.ingestion.inbox_reviewer import _gather_dead_letters
+
+    await _insert_processed(
+        db_session, sender="automated@airbnb.com", subject="Reservation update?"
+    )
+    await _insert_processed(db_session, sender="noreply@example.com")
+    await _insert_processed(
+        db_session,
+        sender="no-reply@vrbo.com",
+        created_at=datetime.now(UTC) - timedelta(days=30),
+    )
+    await _insert_processed(
+        db_session, sender="automated@airbnb.com", disposition="parse_error"
+    )
+
+    letters = await _gather_dead_letters(8)
+
+    assert [letter.subject for letter in letters] == ["Reservation update?"]
+    assert letters[0].sender == "automated@airbnb.com"
+    assert letters[0].message_id
+
+
+@pytest.mark.asyncio
+async def test_reviewer_lookback_can_be_widened_for_a_historical_backlog(db_session):
+    """The first real run reviews a backlog older than the weekly window."""
+    from app.ingestion.inbox_reviewer import _gather_dead_letters
+
+    await _insert_processed(
+        db_session,
+        sender="no-reply@vrbo.com",
+        subject="Old unrecognised email",
+        created_at=datetime.now(UTC) - timedelta(days=300),
+    )
+
+    assert await _gather_dead_letters(8) == []
+    assert len(await _gather_dead_letters(400)) == 1

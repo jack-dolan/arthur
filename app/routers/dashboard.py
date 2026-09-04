@@ -17,7 +17,6 @@ from email.utils import parseaddr
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -40,11 +39,11 @@ from app.integrations.hoa.window import hoa_window, today_et
 from app.routers.auth import require_user
 from app.tasks.dispatch import _dispatch_pending_tasks
 from app.tasks.handlers.docusign import void_envelope_idempotent
+from app.templating import templates
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 
 # Strong references to background tasks — prevents GC before completion.
 # See: https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
@@ -209,6 +208,45 @@ def _validate_email(raw: str) -> str | None:
     return None
 
 
+def _door_pin(phone: str) -> str | None:
+    """Return the last 4 digits of *phone*, or None if it holds fewer than 4.
+
+    Mirrors app.tasks.handlers.access_code._last_four_digits, which is what
+    actually becomes the PIN on the lock.
+    """
+    digits = re.sub(r"\D", "", phone)
+    return digits[-4:] if len(digits) >= 4 else None
+
+
+def _same_phone(submitted: str | None, stored: str | None) -> bool:
+    """True when a submitted phone is the stored phone written differently.
+
+    The parsers store a phone as the platform wrote it ("+1 5551234567") and
+    the form pre-fills that raw string. _validate_phone strips every non-digit
+    from what comes back, so comparing its output against the raw stored value
+    made an untouched field read as an edit (2026-09-01). Normalize both sides.
+    """
+    if submitted is None or stored is None:
+        return False
+    return submitted == _validate_phone(stored)
+
+
+def _same_email(submitted: str | None, stored: str | None) -> bool:
+    """True when a submitted email is the stored email written differently.
+
+    Same problem as _same_phone: a stored "Guest Example <guest@example.com>"
+    normalizes to the bare address, so the pre-filled value read as an edit.
+    Letter case is ignored too — it reaches the same mailbox, and treating it
+    as a correction would void a live envelope and send the guest a second one.
+    """
+    if submitted is None or stored is None:
+        return False
+    stored_clean = _validate_email(stored)
+    if stored_clean is None:
+        return False
+    return submitted.lower() == stored_clean.lower()
+
+
 def _flip_waiting_tasks(
     booking: Booking,
     *,
@@ -237,12 +275,22 @@ def _flip_waiting_tasks(
                 task.state = TaskState.SKIPPED
 
 
-def _reset_access_code_for_recreate(booking: Booking) -> None:
+def _reset_access_code_for_recreate(
+    booking: Booking, previous_phone: str | None
+) -> None:
     """F13: a phone correction after ACCESS_CODE_CREATE completed invalidates
     the code already on the lock. Delete it and reset the task to PENDING so
     the dispatcher creates a fresh one for the corrected number — reuses
     handle_access_code_create's existing external_ref idempotency guard, no
     handler changes needed.
+
+    Exception (2026-09-01): the door PIN is the phone's last four digits and
+    the code's window comes from the stay dates, which a contact save never
+    touches. So a correction that keeps the last four digits would ask Seam
+    for a code it already holds. Seam rejects that as a duplicate, because
+    its delete of the old code is still propagating to the lock seconds
+    later. The result was a deleted code and a FAILED task — the guest had no
+    way in. Leave the existing code alone instead; it is already correct.
 
     Sync Seam call inside this async route: same tradeoff as
     app.ingestion.cancellation.delete_seam_access_code's other caller —
@@ -255,6 +303,15 @@ def _reset_access_code_for_recreate(booking: Booking) -> None:
     )
     if task is None or task.state != TaskState.COMPLETE or not task.external_ref:
         return
+    if previous_phone is not None and booking.guest_phone is not None:
+        if _door_pin(previous_phone) == _door_pin(booking.guest_phone):
+            log.info(
+                "Dashboard: phone corrected for booking %s but the door code is "
+                "unchanged; leaving Seam code %s in place",
+                booking.id,
+                task.external_ref,
+            )
+            return
     old_ref = task.external_ref
     delete_seam_access_code(old_ref)
     task.external_ref = None
@@ -627,8 +684,12 @@ async def save_contact(
     # F13 (bug hunt 2026-07-22): contact fields are editable, not write-once.
     # Overwriting an already-set value needs the confirm checkbox — a typo'd
     # resubmit shouldn't silently re-trigger the door-code/envelope automations.
-    phone_changed = phone_clean is not None and phone_clean != booking.guest_phone
-    email_changed = email_clean is not None and email_clean != booking.guest_email
+    phone_changed = phone_clean is not None and not _same_phone(
+        phone_clean, booking.guest_phone
+    )
+    email_changed = email_clean is not None and not _same_email(
+        email_clean, booking.guest_email
+    )
     overwrite_needed = (phone_changed and booking.guest_phone is not None) or (
         email_changed and booking.guest_email is not None
     )
@@ -653,6 +714,7 @@ async def save_contact(
     # D-13: all writes in a single transaction
     email_saved = email_changed
     phone_saved = phone_changed
+    previous_phone = booking.guest_phone
 
     if email_saved:
         booking.guest_email = email_clean
@@ -678,7 +740,7 @@ async def save_contact(
     # task so the dispatcher (fired below) creates a fresh one instead of
     # skipping via the external_ref idempotency guard.
     if phone_saved:
-        _reset_access_code_for_recreate(booking)
+        _reset_access_code_for_recreate(booking, previous_phone)
     if email_saved:
         _reset_docusign_for_resend(booking)
 

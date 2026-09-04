@@ -34,7 +34,7 @@ jobs:
           enable-cache: true
 
       - name: Install Python and dependencies
-        run: uv sync --extra dev --python 3.12
+        run: uv sync --extra dev --python 3.14
 
       - name: Install Squawk 2.61.0 (pinned, checksum-verified)
         run: |
@@ -96,7 +96,7 @@ jobs:
           enable-cache: true
 
       - name: Install Python and dependencies
-        run: uv sync --extra dev --python 3.12
+        run: uv sync --extra dev --python 3.14
 
       - name: Run the offline test suite
         run: uv run pytest -q

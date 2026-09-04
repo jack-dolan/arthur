@@ -3,6 +3,7 @@ import httplib2
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
+from app.preview import inert_client, is_preview_mode
 from app.settings import settings
 
 SCOPES = [
@@ -29,6 +30,11 @@ def _build_credentials(refresh_token: str) -> Credentials:
 
 
 def _build_gmail_service(refresh_token: str):
+    # Preview deployments never construct a real client (app/preview.py). This
+    # is the same choke point the test suite's live-API guard blocks, because
+    # it is the only way through to Gmail.
+    if is_preview_mode():
+        return inert_client("Gmail")
     creds = _build_credentials(refresh_token)
     authed_http = google_auth_httplib2.AuthorizedHttp(
         creds, http=httplib2.Http(timeout=HTTP_TIMEOUT_SECONDS)

@@ -3,42 +3,44 @@ name = "home-rental-automation"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.32.0",
-    "sqlalchemy[asyncio]>=2.0.0",
+    "fastapi>=0.141.1",
+    "uvicorn[standard]>=0.52.1",
+    "sqlalchemy[asyncio]>=2.0.51",
     "asyncpg>=0.30.0",
-    "alembic>=1.14.0",
+    "alembic>=1.19.0",
     "psycopg2-binary>=2.9.10",
-    "pydantic>=2.10.0",
-    "pydantic-settings>=2.7.0",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.15.0",
     "pyyaml>=6.0.2",
     "python-multipart>=0.0.20",
-    "google-auth>=2.37.0",
-    "google-auth-httplib2>=0.2.0",
-    "google-auth-oauthlib>=1.2.0",
-    "google-api-python-client>=2.160.0",
+    "google-auth>=2.56.3",
+    "google-auth-httplib2>=0.4.1",
+    "google-auth-oauthlib>=1.4.0",
+    "google-api-python-client>=2.198.0",
     "httpx>=0.28.0",
     "jinja2>=3.1.6",
-    "apscheduler>=3.10.0",
+    "apscheduler>=3.11.3",
     "docusign-esign>=6.1.0",
-    "seam>=1.0.0",
+    "seam>=1.209.1",
+    # Claude API, used only by the weekly inbox drift reviewer (alert-only).
+    "anthropic>=0.69.0",
     # Dashboard login via Google OIDC ("Sign in with Google"). authlib handles
     # the OAuth2/OpenID-Connect flow + id_token verification; itsdangerous backs
     # Starlette's SessionMiddleware (signed session cookie).
     "authlib>=1.3.0",
     "itsdangerous>=2.2.0",
-    # The deploy base image (python:3.12-slim) ships no system tz database;
+    # The deploy base image (python:3.14-slim) ships no system tz database;
     # every ET-based domain rule resolves a zone via zoneinfo.ZoneInfo, so the
     # IANA data must travel with the app or the app crashes on startup.
-    "tzdata>=2024.1",
+    "tzdata>=2026.3",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3.0",
-    "pytest-asyncio>=0.25.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "pytest-cov>=6.0.0",
-    "ruff>=0.14.4",
+    "ruff>=0.16.1",
 ]
 
 [build-system]
@@ -71,7 +73,7 @@ select = ["E", "F", "I", "S"]
     # `assert` is the entire point of a test. 1100+ occurrences.
     "S101",
     # Credential-shaped literals in tests are mandated placeholders, never real
-    # values -- see the privacy rules in CLAUDE.md and the testing-safely skill.
+    # values -- see the privacy rules in the repo conventions doc and the testing-safely skill.
     "S105",
     "S106",
     # Test harnesses shell out to git, bash and docker with literal argument

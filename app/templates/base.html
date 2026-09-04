@@ -8,10 +8,32 @@
      absolute URL renders http:// inside an https:// page and is blocked as
      mixed content. See tests/unit/test_template_assets.py. #}
   <link rel="stylesheet" href="/static/style.css">
+  {# The Arthur fist. favicon.ico carries 16/32/48/64px entries so the browser
+     picks its own size instead of downscaling one big image. All three are
+     derived from app/static/arthur-fist.png, the committed master crop. #}
+  <link rel="icon" href="/static/favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 </head>
 <body>
+  {# Preview/demo deployments must be impossible to mistake for production.
+     app/preview.py registers both globals. #}
+  {% if preview_mode() %}
+  <div class="preview-banner" role="status">{{ preview_banner_text() }}</div>
+  {% endif %}
   <header>
-    <h1>Rental Dashboard</h1>
+    <h1>ARTHUR - Rental Dashboard</h1>
+    {# The backronym for the name in the heading above. Each word's first
+       letter is wrapped so the stylesheet can pick the acronym out;
+       tests/unit/test_template_assets.py fails if the initials stop spelling
+       ARTHUR. The <title> deliberately still reads "Rental Dashboard". #}
+    <p class="tagline">
+      <span class="tagline-initial">A</span>
+      <span class="tagline-initial">R</span>obot
+      <span class="tagline-initial">T</span>hat
+      <span class="tagline-initial">H</span>andles
+      <span class="tagline-initial">U</span>nglamorous
+      <span class="tagline-initial">R</span>esponsibilities
+    </p>
     <nav>
       {% if request.session.get('user') %}
         <a href="/">Bookings</a>

@@ -122,6 +122,28 @@ async def handle_cleaner_sheet(
     except StopIteration:
         raise ValueError(f"Property '{booking.property_id}' not found in config")
 
+    # --- 1a. The kill switch, checked BEFORE any Sheets client exists ---------
+    # This is the authoritative guard, not _initial_tasks. A CLEANER_SHEET_ADD
+    # task reaches this handler from three directions -- the ingestion dispatch,
+    # the daily requeue of stalled automations, and a manual retry -- and only
+    # the first of those goes anywhere near task creation. Guarding here covers
+    # all three, including the rows that already existed when the switch was
+    # thrown.
+    #
+    # SKIPPED, not COMPLETE: the row was never written, and the dashboard's
+    # progress metric already counts SKIPPED as done (routers/dashboard.py), so
+    # the booking reads as finished without claiming work that did not happen.
+    # No completed_at, for the same reason.
+    if not prop.cleaner_schedule.enabled:
+        task.state = TaskState.SKIPPED
+        log.info(
+            "cleaner sheet: DISABLED for property %s; skipping row for booking %s "
+            "(no spreadsheet request made)",
+            booking.property_id,
+            booking.external_id,
+        )
+        return
+
     spreadsheet_id = prop.cleaner_schedule.spreadsheet_id
     sheet_name = prop.cleaner_schedule.sheet_name
 

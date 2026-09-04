@@ -19,16 +19,16 @@ import logging
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import APIRouter, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException
 
 from app.config import load_config
+from app.preview import PREVIEW_USER, is_preview_mode
 from app.settings import settings
+from app.templating import templates
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 
 _GOOGLE_METADATA = "https://accounts.google.com/.well-known/openid-configuration"
 
@@ -63,7 +63,15 @@ def require_user(request: Request) -> str:
 
     Re-checks the allowlist on every request, so removing an email from
     config.yaml immediately revokes any live session.
+
+    A preview deployment holds placeholder Google OIDC credentials, so no real
+    sign-in can complete there and the dashboard — the thing worth showing —
+    would be unreachable. Preview mode therefore grants a fixed demo identity
+    to every visitor. That is only safe because a preview's data is entirely
+    fabricated, which app/preview.py's startup credential check guarantees.
     """
+    if is_preview_mode():
+        return PREVIEW_USER
     user = request.session.get("user")
     if user and is_email_allowed(user):
         return user
@@ -76,18 +84,26 @@ def require_user(request: Request) -> str:
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    if is_email_allowed(request.session.get("user")):
+    if is_preview_mode() or is_email_allowed(request.session.get("user")):
         return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     return templates.TemplateResponse(request, "login.html", {})
 
 
 @router.get("/auth/login")
 async def auth_login(request: Request):
+    # authorize_redirect fetches Google's OIDC metadata document, which is an
+    # outbound call — and a preview makes none. There is nothing to sign into
+    # there either, since require_user already grants the demo identity.
+    if is_preview_mode():
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     return await oauth.google.authorize_redirect(request, _redirect_uri())
 
 
 @router.get("/auth/callback")
 async def auth_callback(request: Request):
+    # Same reason as /auth/login: the token exchange is an outbound call.
+    if is_preview_mode():
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     try:
         token = await oauth.google.authorize_access_token(request)
     except OAuthError as exc:

@@ -39,6 +39,38 @@ def test_email_addresses_loaded():
     assert config.email.alerts == "alerts@example.com"
 
 
+def test_alerts_to_header_is_just_the_alerts_mailbox_by_default():
+    """A config with no extra recipients must address alerts exactly as before."""
+    from app.config import load_config
+    config = load_config(FIXTURES / "config.test.yaml")
+    assert config.email.alerts_additional_recipients == []
+    assert config.email.alerts_to_header == "alerts@example.com"
+
+
+def test_alerts_to_header_appends_additional_recipients():
+    from app.config import EmailConfig
+    email = EmailConfig(
+        booking_feed="feed@example.com",
+        alerts="alerts@example.com",
+        alerts_additional_recipients=["second@example.com", "third@example.com"],
+    )
+    assert email.alerts_to_header == (
+        "alerts@example.com, second@example.com, third@example.com"
+    )
+
+
+def test_alerts_to_header_ignores_blank_entries():
+    """A stray blank list entry must not produce an empty address in the header,
+    which Gmail rejects for the whole message."""
+    from app.config import EmailConfig
+    email = EmailConfig(
+        booking_feed="feed@example.com",
+        alerts="alerts@example.com",
+        alerts_additional_recipients=["  ", "second@example.com  "],
+    )
+    assert email.alerts_to_header == "alerts@example.com, second@example.com"
+
+
 def test_single_property_loaded():
     from app.config import PropertyConfig, load_config
     config = load_config(FIXTURES / "config.test.yaml")
@@ -234,3 +266,43 @@ def test_config_docusign_signer_role_override():
         }],
     })
     assert config.properties[0].docusign_signer_role == "Guest"
+
+
+# ---------------------------------------------------------------------------
+# cleaner_schedule.enabled — the kill switch for cleaner-sheet writes
+#
+# The cleaning company runs its own booking-calendar script that adds the row
+# itself, so the owner turned this automation off (2026-08-02). The flag is
+# per-property and defaults to True so every pre-existing config keeps its
+# current behaviour on upgrade.
+# ---------------------------------------------------------------------------
+
+def test_cleaner_schedule_enabled_defaults_to_true():
+    """Omitting `enabled` leaves the automation on — upgrades must not change behaviour."""
+    from app.config import CleanerScheduleConfig
+    config = CleanerScheduleConfig(
+        type="google_sheets", spreadsheet_id="x", sheet_name="y",
+    )
+    assert config.enabled is True
+
+
+def test_cleaner_schedule_enabled_can_be_disabled():
+    """`enabled: false` parses and is readable off the property config."""
+    from app.config import AppConfig
+    config = AppConfig.model_validate({
+        "owners": {"primary_name": "A", "cohost_name": "B"},
+        "email": {"booking_feed": "feed@example.com", "alerts": "alerts@example.com"},
+        "properties": [{
+            "id": "p1",
+            "hoa": {"enabled": False},
+            "cleaner_schedule": {
+                "type": "google_sheets",
+                "spreadsheet_id": "abc123",
+                "sheet_name": "Sheet",
+                "enabled": False,
+            },
+            "seam_device_id": "dev1",
+            "docusign_template_id": "tpl1",
+        }],
+    })
+    assert config.properties[0].cleaner_schedule.enabled is False

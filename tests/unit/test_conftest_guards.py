@@ -54,3 +54,19 @@ def test_docusign_guard_trips_on_unmocked_token_exchange():
 
         with pytest.raises(RuntimeError, match="blocked by the test guard"):
             _refresh_access_token()
+
+
+def test_claude_guard_trips_on_unmocked_client():
+    """The Claude API costs money per call, so an unguarded test path bills the
+    owner rather than sending an email — a quieter leak than the other four,
+    and the same class of mistake."""
+    from unittest.mock import patch
+
+    # Synthetic key so the guard is what stops the call, not the
+    # "ANTHROPIC_API_KEY is not set" precondition.
+    with patch("app.integrations.claude.client.settings") as mock_settings:
+        mock_settings.anthropic_api_key = "sk-ant-placeholder"
+        from app.integrations.claude.client import get_anthropic_client
+
+        with pytest.raises(RuntimeError, match="blocked by the test guard"):
+            get_anthropic_client()

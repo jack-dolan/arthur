@@ -35,7 +35,20 @@ class Settings(BaseSettings):
     # Seam
     seam_api_key: str = ""
 
+    # Anthropic (Claude API). Used by ONE job: the weekly LLM inbox reviewer,
+    # which asks Claude whether any platform-domain OTHER dead-letter is a
+    # booking the keyword classifier missed. Alert-only — it never writes to
+    # the classifier, tasks or dead letters. Empty = the reviewer logs and
+    # skips; the daily credential sentinel treats empty as a dead credential.
+    anthropic_api_key: str = ""
+
     # App
+    # Preview/demo deployment switch (PREVIEW_MODE=1). Off in production, and
+    # off by default so it can only ever be opted into. When on, the app
+    # registers no scheduler jobs, returns inert stubs from every outbound
+    # client factory, refuses to start if any credential above looks real, and
+    # seeds fake demo bookings. See app/preview.py.
+    preview_mode: bool = False
     # S105: this placeholder is a deliberate tripwire, not a hardcoded secret.
     # main.py's lifespan refuses to start the server while it is still in force.
     secret_key: str = "insecure-default-change-in-production"  # noqa: S105

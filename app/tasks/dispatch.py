@@ -179,9 +179,17 @@ async def _dispatch_pending_tasks(booking_id: uuid.UUID) -> None:
                         )
                     )
                     await session.commit()
-                    # The rollback expired the whole identity map — the next
-                    # iteration reads task.state, so re-load the collection
-                    # fresh (no-op under mocked sessions in unit tests).
+                    # The rollback expired the whole identity map, and
+                    # refreshing one attribute only un-expires that attribute.
+                    # Refresh the booking's COLUMNS too: the next handler reads
+                    # them (handle_hoa_email reads booking.signed_pdf_path
+                    # first), and reading an expired column on an AsyncSession-
+                    # bound instance raises MissingGreenlet — which used to be
+                    # recorded as that task's own failure. Columns first, then
+                    # the collection, because a bare refresh() re-expires
+                    # already-loaded relationships.
+                    # (Both are no-ops under mocked sessions in unit tests.)
+                    await session.refresh(booking)
                     await session.refresh(booking, attribute_names=["tasks"])
                     tasks_by_type = {t.task_type: t for t in booking.tasks}
                 except Exception:
