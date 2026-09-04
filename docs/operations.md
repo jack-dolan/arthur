@@ -5,8 +5,9 @@ The README covers what the system *is*; this page covers running it.
 
 Two deployment topologies are supported, and they differ enough that the wrong
 instructions are worse than none. **This page documents the image topology,
-which is what production runs.** Where the Compose topology differs, it says so.
-`the repo conventions doc` § Portability is the short statement of both.
+which is what production runs.** Where the Compose topology differs, it says so;
+the Portability section of the repo conventions doc is the short statement of
+both.
 
 ---
 
