@@ -12,6 +12,8 @@ import uuid
 from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from app.db.models import (
     Booking,
     BookingStatus,
@@ -1187,3 +1189,192 @@ async def test_save_contact_phone_change_keeping_last_four_keeps_access_code():
     mock_delete.assert_not_called()
     assert access_task.state == TaskState.COMPLETE
     assert access_task.external_ref == "seam-code-old"
+
+
+# ---------------------------------------------------------------------------
+# DocuSign reminder button (detail page) — "Send reminder via DocuSign"
+# ---------------------------------------------------------------------------
+
+
+def test_hoa_pipeline_can_remind_when_sent_and_unsigned():
+    booking = _workflow_booking(signed_pdf_path=None)
+    send_task = next(t for t in booking.tasks if t.task_type == TaskType.DOCUSIGN_SEND)
+    send_task.external_ref = "envelope-1"
+
+    p = _pipeline_for(booking)
+    assert p["can_remind"] is True
+    assert p["last_reminded_at"] is None
+
+
+def test_hoa_pipeline_cannot_remind_once_signed():
+    booking = _workflow_booking(signed_pdf_path="/app/data/pdfs/x.pdf")
+    send_task = next(t for t in booking.tasks if t.task_type == TaskType.DOCUSIGN_SEND)
+    send_task.external_ref = "envelope-1"
+
+    assert _pipeline_for(booking)["can_remind"] is False
+
+
+def test_hoa_pipeline_cannot_remind_before_send():
+    booking = _workflow_booking(signed_pdf_path=None, docusign_send=TaskState.WAITING)
+
+    assert _pipeline_for(booking)["can_remind"] is False
+
+
+def test_hoa_pipeline_cannot_remind_without_envelope_id():
+    """COMPLETE with no external_ref should not happen, but the button must
+    not offer a reminder it cannot address to an envelope."""
+    booking = _workflow_booking(signed_pdf_path=None)
+
+    assert _pipeline_for(booking)["can_remind"] is False
+
+
+def test_hoa_pipeline_cannot_remind_on_cancelled_booking():
+    booking = _workflow_booking(signed_pdf_path=None)
+    booking.status = BookingStatus.CANCELLED
+    send_task = next(t for t in booking.tasks if t.task_type == TaskType.DOCUSIGN_SEND)
+    send_task.external_ref = "envelope-1"
+
+    assert _pipeline_for(booking)["can_remind"] is False
+
+
+def test_hoa_pipeline_reports_last_reminded_at():
+    booking = _workflow_booking(signed_pdf_path=None)
+    when = datetime(2026, 9, 18, 14, 0, tzinfo=timezone.utc)
+    booking.docusign_last_reminded_at = when
+
+    assert _pipeline_for(booking)["last_reminded_at"] == when
+
+
+def _remindable_booking() -> tuple[Booking, BookingTask]:
+    booking = _workflow_booking(signed_pdf_path=None)
+    send_task = next(t for t in booking.tasks if t.task_type == TaskType.DOCUSIGN_SEND)
+    send_task.external_ref = "envelope-1"
+    return booking, send_task
+
+
+async def test_send_docusign_reminder_records_time_and_redirects():
+    from fastapi.responses import RedirectResponse
+
+    from app.routers.dashboard import send_docusign_reminder
+
+    booking, _ = _remindable_booking()
+    mock_session = _mock_session_for(booking)
+
+    with patch("app.routers.dashboard.remind_envelope") as mock_remind:
+        response = await send_docusign_reminder(
+            booking_id=booking.id, request=_post_ctx(), db=mock_session
+        )
+
+    mock_remind.assert_called_once_with("envelope-1")
+    assert isinstance(response, RedirectResponse)
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/bookings/{booking.id}?reminder=sent"
+    assert booking.docusign_last_reminded_at is not None
+    assert booking.docusign_last_reminded_at.tzinfo is not None
+    mock_session.commit.assert_awaited_once()
+
+
+async def test_send_docusign_reminder_rejected_once_signed():
+    from fastapi import HTTPException
+
+    from app.routers.dashboard import send_docusign_reminder
+
+    booking, _ = _remindable_booking()
+    booking.signed_pdf_path = "/app/data/pdfs/x.pdf"
+    mock_session = _mock_session_for(booking)
+
+    with patch("app.routers.dashboard.remind_envelope") as mock_remind:
+        with pytest.raises(HTTPException) as exc_info:
+            await send_docusign_reminder(
+                booking_id=booking.id, request=_post_ctx(), db=mock_session
+            )
+
+    assert exc_info.value.status_code == 409
+    mock_remind.assert_not_called()
+    assert booking.docusign_last_reminded_at is None
+    mock_session.commit.assert_not_awaited()
+
+
+async def test_send_docusign_reminder_rejected_before_send():
+    from fastapi import HTTPException
+
+    from app.routers.dashboard import send_docusign_reminder
+
+    booking = _workflow_booking(signed_pdf_path=None, docusign_send=TaskState.WAITING)
+    mock_session = _mock_session_for(booking)
+
+    with patch("app.routers.dashboard.remind_envelope") as mock_remind:
+        with pytest.raises(HTTPException) as exc_info:
+            await send_docusign_reminder(
+                booking_id=booking.id, request=_post_ctx(), db=mock_session
+            )
+
+    assert exc_info.value.status_code == 409
+    mock_remind.assert_not_called()
+
+
+async def test_send_docusign_reminder_rejected_on_cancelled_booking():
+    from fastapi import HTTPException
+
+    from app.routers.dashboard import send_docusign_reminder
+
+    booking, _ = _remindable_booking()
+    booking.status = BookingStatus.CANCELLED
+    mock_session = _mock_session_for(booking)
+
+    with patch("app.routers.dashboard.remind_envelope") as mock_remind:
+        with pytest.raises(HTTPException) as exc_info:
+            await send_docusign_reminder(
+                booking_id=booking.id, request=_post_ctx(), db=mock_session
+            )
+
+    assert exc_info.value.status_code == 409
+    mock_remind.assert_not_called()
+
+
+async def test_send_docusign_reminder_not_found():
+    from fastapi import HTTPException
+
+    from app.routers.dashboard import send_docusign_reminder
+
+    mock_session = _mock_session_for(None)
+
+    with patch("app.routers.dashboard.remind_envelope") as mock_remind:
+        with pytest.raises(HTTPException) as exc_info:
+            await send_docusign_reminder(
+                booking_id=uuid.uuid4(), request=_post_ctx(), db=mock_session
+            )
+
+    assert exc_info.value.status_code == 404
+    mock_remind.assert_not_called()
+
+
+async def test_send_docusign_reminder_api_error_rerenders_with_message():
+    """A DocuSign rejection (e.g. the envelope was completed or voided outside
+    the app) is shown on the page, and nothing is recorded as sent."""
+    from docusign_esign.client.api_exception import ApiException
+
+    from app.routers.dashboard import send_docusign_reminder
+
+    booking, _ = _remindable_booking()
+    mock_session = _mock_session_for(booking)
+
+    with (
+        patch(
+            "app.routers.dashboard.remind_envelope",
+            side_effect=ApiException(status=400, reason="Envelope is voided."),
+        ),
+        patch("app.routers.dashboard.load_config", return_value=_pipeline_config()),
+        patch("app.routers.dashboard.templates") as mock_templates,
+    ):
+        mock_templates.TemplateResponse.return_value = MagicMock(status_code=200)
+        response = await send_docusign_reminder(
+            booking_id=booking.id, request=_post_ctx(), db=mock_session
+        )
+
+    assert response.status_code == 200
+    ctx = mock_templates.TemplateResponse.call_args.kwargs["context"]
+    assert "reminder_error" in ctx
+    assert "DocuSign" in ctx["reminder_error"]
+    assert booking.docusign_last_reminded_at is None
+    mock_session.commit.assert_not_awaited()

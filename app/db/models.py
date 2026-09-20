@@ -164,6 +164,11 @@ class Booking(Base):
         String(128), nullable=True, unique=True
     )
     signed_pdf_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # When the owner last pressed the dashboard's "Send reminder via DocuSign"
+    # button (revision 0008). NULL until the first reminder.
+    docusign_last_reminded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

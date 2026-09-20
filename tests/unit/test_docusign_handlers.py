@@ -768,3 +768,47 @@ async def test_handle_envelope_completed_sends_hoa_late_when_window_passed():
 
     mock_hoa_send.assert_called_once()
     assert hoa_task.state == TaskState.COMPLETE
+
+
+# ---------------------------------------------------------------------------
+# remind_envelope — dashboard "Send reminder via DocuSign" button
+# ---------------------------------------------------------------------------
+
+def test_remind_envelope_calls_update_with_resend_flag():
+    """A reminder is DocuSign's resend: Envelopes::update with
+    resend_envelope=true on the SAME envelope. No new envelope is created, so
+    the stored envelope id (and the completed webhook match) stays valid."""
+    from app.tasks.handlers.docusign import remind_envelope
+
+    with patch("app.tasks.handlers.docusign.get_envelope_api") as mock_api:
+        mock_envelopes_api = MagicMock()
+        mock_api.return_value = (mock_envelopes_api, "acct-1")
+
+        remind_envelope("env-unsigned")
+
+    mock_envelopes_api.create_envelope.assert_not_called()
+    mock_envelopes_api.update.assert_called_once()
+    args, kwargs = mock_envelopes_api.update.call_args
+    assert args[:2] == ("acct-1", "env-unsigned")
+    assert kwargs["resend_envelope"] == "true"
+    # A resend must not change the envelope's status (e.g. must not void it).
+    assert getattr(kwargs["envelope"], "status", None) is None
+
+
+def test_remind_envelope_propagates_api_exception():
+    """Unlike void, a reminder has no 'already done' case to swallow: a 400
+    (completed/voided envelope) is a real failure the dashboard must show."""
+    from docusign_esign.client.api_exception import ApiException
+
+    from app.tasks.handlers.docusign import remind_envelope
+
+    with patch("app.tasks.handlers.docusign.get_envelope_api") as mock_api:
+        mock_envelopes_api = MagicMock()
+        mock_envelopes_api.update.side_effect = ApiException(
+            status=400, reason="Envelope is already in a completed state."
+        )
+        mock_api.return_value = (mock_envelopes_api, "acct-1")
+
+        with pytest.raises(ApiException) as exc_info:
+            remind_envelope("env-completed")
+        assert exc_info.value.status == 400

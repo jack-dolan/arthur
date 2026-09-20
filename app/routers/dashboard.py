@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 
+from docusign_esign.client.api_exception import ApiException
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
@@ -38,7 +39,7 @@ from app.ingestion.cancellation import delete_seam_access_code
 from app.integrations.hoa.window import hoa_window, today_et
 from app.routers.auth import require_user
 from app.tasks.dispatch import _dispatch_pending_tasks
-from app.tasks.handlers.docusign import void_envelope_idempotent
+from app.tasks.handlers.docusign import remind_envelope, void_envelope_idempotent
 from app.templating import templates
 
 log = logging.getLogger(__name__)
@@ -429,6 +430,24 @@ def _summarize_tasks(booking: Booking) -> dict[str, object]:
     return {"status": status, "done": done, "total": total, "failed": failed}
 
 
+def _reminder_envelope_id(booking: Booking) -> str | None:
+    """The envelope id a DocuSign reminder would go to, or None when a
+    reminder makes no sense: the booking is not active, the form was never
+    sent (or its envelope id is missing), or the guest has already signed.
+
+    Single source of truth for the detail page's button and the POST route,
+    so the page never offers a reminder the route would refuse.
+    """
+    if booking.status != BookingStatus.ACTIVE or booking.signed_pdf_path is not None:
+        return None
+    send_task = next(
+        (t for t in booking.tasks if t.task_type == TaskType.DOCUSIGN_SEND), None
+    )
+    if send_task is None or send_task.state != TaskState.COMPLETE:
+        return None
+    return send_task.external_ref or None
+
+
 def _hoa_pipeline(
     booking: Booking, tasks_by_type: dict[TaskType, BookingTask]
 ) -> dict[str, object] | None:
@@ -475,6 +494,8 @@ def _hoa_pipeline(
         "docusign_sent": docusign_sent,
         "docusign_sent_at": send_task.completed_at if docusign_sent else None,
         "signed": booking.signed_pdf_path is not None,
+        "can_remind": _reminder_envelope_id(booking) is not None,
+        "last_reminded_at": booking.docusign_last_reminded_at,
         "earliest": earliest,
         "latest": latest,
         "hoa_sent": hoa_sent,
@@ -607,6 +628,7 @@ async def booking_list(
 async def booking_detail(
     booking_id: uuid.UUID,
     request: Request,
+    reminder: str | None = None,
     _: str = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -625,6 +647,8 @@ async def booking_detail(
             "errors": {},
             "submitted_phone": None,
             "submitted_email": None,
+            # Set by the redirect after a successful POST /docusign-reminder.
+            "reminder_sent": reminder == "sent",
         },
     )
 
@@ -760,3 +784,78 @@ async def save_contact(
     )
 
     return RedirectResponse(url=f"/bookings/{booking_id}", status_code=303)
+
+
+@router.post("/bookings/{booking_id}/docusign-reminder")
+async def send_docusign_reminder(
+    booking_id: uuid.UUID,
+    request: Request,
+    _: str = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Resend the signing email for the booking's unsigned DocuSign envelope.
+
+    DocuSign's own "Resend"/"Remind": the same envelope is re-notified, no new
+    one is created. On success the time is recorded on the booking and the
+    page reloads with a notice; a DocuSign rejection re-renders the page with
+    the error and records nothing.
+    """
+    result = await db.execute(select(Booking).where(Booking.id == booking_id))
+    booking = result.scalar_one_or_none()
+    if booking is None:
+        log.warning("Dashboard: booking %s not found in send_docusign_reminder", booking_id)
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    await db.refresh(booking, attribute_names=["tasks", "data_points"])
+
+    envelope_id = _reminder_envelope_id(booking)
+    if envelope_id is None:
+        log.warning(
+            "Dashboard: refusing DocuSign reminder for booking %s "
+            "(status=%s, signed=%s)",
+            booking_id,
+            _readable_enum_value(booking.status),
+            booking.signed_pdf_path is not None,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="No unsigned DocuSign envelope to remind on this booking",
+        )
+
+    try:
+        # F11 pattern: the sync token exchange + SDK call stay off the event loop.
+        await asyncio.to_thread(remind_envelope, envelope_id)
+    except ApiException as exc:
+        log.error(
+            "Dashboard: DocuSign reminder for booking %s (envelope %s) failed: "
+            "status=%s reason=%s",
+            booking_id,
+            envelope_id,
+            exc.status,
+            exc.reason,
+        )
+        return templates.TemplateResponse(
+            request=request,
+            name="detail.html",
+            context={
+                **_detail_context(booking),
+                "errors": {},
+                "submitted_phone": None,
+                "submitted_email": None,
+                "reminder_sent": False,
+                "reminder_error": (
+                    f"DocuSign refused the reminder (HTTP {exc.status}: {exc.reason}). "
+                    "The envelope may have been completed, voided or declined "
+                    "outside the app."
+                ),
+            },
+        )
+
+    booking.docusign_last_reminded_at = datetime.now(timezone.utc)
+    await db.commit()  # before the redirect (Pitfall 4)
+    log.info(
+        "Dashboard: sent DocuSign reminder for booking %s (envelope %s)",
+        booking_id,
+        envelope_id,
+    )
+    return RedirectResponse(url=f"/bookings/{booking_id}?reminder=sent", status_code=303)

@@ -61,6 +61,12 @@
   {% if hoa_pipeline %}
   <section>
     <h2>HOA Registration</h2>
+    {% if reminder_sent %}
+    <p class="notice" role="status">Reminder sent. DocuSign has emailed the guest a fresh link to sign the form.</p>
+    {% endif %}
+    {% if reminder_error %}
+    <p class="error" role="alert">{{ reminder_error }}</p>
+    {% endif %}
     <div class="table-wrap">
     <table>
       <thead>
@@ -76,6 +82,17 @@
             {% if hoa_pipeline.docusign_sent %}
             <span class="badge badge-complete">sent</span>
             {% if hoa_pipeline.docusign_sent_at %}<small>{{ hoa_pipeline.docusign_sent_at.strftime("%Y-%m-%d") }}</small>{% endif %}
+            {% if hoa_pipeline.can_remind %}
+            {# DocuSign's own "Resend"/"Remind": re-notifies the SAME envelope.
+               A wrong address is fixed with the contact form below, which
+               voids and sends a fresh envelope instead. #}
+            <form method="POST" action="/bookings/{{ booking.id }}/docusign-reminder" class="inline-action">
+              <button type="submit" class="btn-secondary">Send reminder via DocuSign</button>
+            </form>
+            {% endif %}
+            {% if hoa_pipeline.last_reminded_at %}
+            <small class="reminder-history">Last reminder sent {{ hoa_pipeline.last_reminded_at.strftime("%Y-%m-%d") }}</small>
+            {% endif %}
             {% else %}
             <span class="badge badge-pending">not yet</span>
             {% endif %}

@@ -686,3 +686,119 @@ async def test_contact_save_overwrite_with_confirm_redirects_303():
 
     assert response.status_code == 303
     assert booking.guest_phone == "5559876543"
+
+
+# ---------------------------------------------------------------------------
+# DocuSign reminder button — "Send reminder via DocuSign"
+# ---------------------------------------------------------------------------
+
+
+async def test_docusign_reminder_requires_auth():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(f"/bookings/{uuid.uuid4()}/docusign-reminder")
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+
+
+def _remindable_booking(**kwargs) -> Booking:
+    from datetime import timedelta
+
+    from app.db.models import TaskType
+
+    booking = _full_task_booking(
+        guest_phone="5551234567", guest_email="g@example.com", **kwargs
+    )
+    booking.check_in_date = date.today() + timedelta(days=30)
+    booking.check_out_date = booking.check_in_date + timedelta(days=3)
+    send_task = next(t for t in booking.tasks if t.task_type == TaskType.DOCUSIGN_SEND)
+    send_task.external_ref = "envelope-1"
+    return booking
+
+
+async def test_detail_shows_reminder_button_when_sent_and_unsigned():
+    booking = _remindable_booking()
+
+    html = await _render_detail(booking)
+
+    assert f'action="/bookings/{booking.id}/docusign-reminder"' in html
+    assert "Send reminder via DocuSign" in html
+    assert "Last reminder sent" not in html
+
+
+async def test_detail_hides_reminder_button_once_signed():
+    booking = _remindable_booking()
+    booking.signed_pdf_path = "/app/data/pdfs/x.pdf"
+
+    html = await _render_detail(booking)
+
+    assert "Send reminder via DocuSign" not in html
+
+
+async def test_detail_shows_last_reminder_date():
+    from datetime import datetime, timezone
+
+    booking = _remindable_booking()
+    booking.docusign_last_reminded_at = datetime(2026, 9, 18, 14, 0, tzinfo=timezone.utc)
+
+    html = await _render_detail(booking)
+
+    assert "Last reminder sent 2026-09-18" in html
+
+
+async def test_detail_shows_reminder_sent_notice():
+    from unittest.mock import patch
+
+    booking = _remindable_booking()
+    mock_session = AsyncMock()
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = booking
+    mock_session.execute = AsyncMock(return_value=execute_result)
+    mock_session.refresh = AsyncMock()
+    override = await _override_get_db_factory(mock_session)
+
+    try:
+        _auth_override()
+        app.dependency_overrides[get_db] = override
+        with patch(
+            "app.routers.dashboard.load_config",
+            return_value=_detail_pipeline_config(),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                plain = await client.get(f"/bookings/{booking.id}")
+                flagged = await client.get(f"/bookings/{booking.id}?reminder=sent")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert "Reminder sent" not in plain.text
+    assert "Reminder sent" in flagged.text
+
+
+async def test_docusign_reminder_post_redirects_303():
+    from unittest.mock import patch
+
+    booking = _remindable_booking()
+    mock_session = AsyncMock()
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = booking
+    mock_session.execute = AsyncMock(return_value=execute_result)
+    mock_session.refresh = AsyncMock()
+    mock_session.commit = AsyncMock()
+    override = await _override_get_db_factory(mock_session)
+
+    try:
+        _auth_override()
+        app.dependency_overrides[get_db] = override
+        with patch("app.routers.dashboard.remind_envelope") as mock_remind:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post(f"/bookings/{booking.id}/docusign-reminder")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/bookings/{booking.id}?reminder=sent"
+    mock_remind.assert_called_once_with("envelope-1")
+    assert booking.docusign_last_reminded_at is not None

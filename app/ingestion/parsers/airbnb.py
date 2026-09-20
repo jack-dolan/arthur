@@ -13,9 +13,11 @@ layout.  Key sections in the body:
 The guest name is extracted from the Subject line:
     "Reservation confirmed - {FULL NAME} arrives {MON} {DAY}"
 
-Dates in Airbnb emails omit the year.  We infer it from the message's Date
-header: if the check-in month is >= the message month we stay in the same
-year; if it is earlier we roll forward to the next year.
+Airbnb writes the year into the date line only when the stay is far enough
+out to need it ("Thu, Dec 23, 2027   Mon, Dec 27, 2027"); otherwise the line
+omits it ("Wed, Jul 15   Sun, Jul 19").  An explicit year is authoritative.
+Without one we infer it from the message's Date header: a (month, day) on or
+after the header's own is this year, anything earlier is next year.
 """
 from __future__ import annotations
 
@@ -31,10 +33,12 @@ _MONTHS = {
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
 }
 
-# "Wed, Jul 15" — day-of-week is optional in synthetic messages.
+# "Wed, Jul 15" or "Thu, Dec 23, 2027" — day-of-week is optional in synthetic
+# messages; the year is optional in real ones (present only for far-out stays).
 _DATE_TOKEN_RE = re.compile(
     r"(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s*)?"
-    r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})",
+    r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})"
+    r"(?:,\s*(\d{4}))?",
     re.IGNORECASE,
 )
 
@@ -86,7 +90,14 @@ def _parse_date_token(token: str, ref_date: date) -> date:
         raise AirbnbParseError(f"Cannot parse date token: {repr(token)}")
     month = _MONTHS[m.group(1).lower()]
     day = int(m.group(2))
-    year = _infer_year(month, day, ref_date)
+    explicit_year = m.group(3)
+    # An explicit year is authoritative (regression 2026-09-19: a Dec 2027 stay
+    # confirmed in Sep 2026 was dated 2026 because the trailing year was
+    # ignored and inference ran instead). Infer only when the line omits it.
+    if explicit_year is not None:
+        year = int(explicit_year)
+    else:
+        year = _infer_year(month, day, ref_date)
     return date(year, month, day)
 
 

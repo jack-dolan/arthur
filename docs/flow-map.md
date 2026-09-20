@@ -155,6 +155,16 @@ background dispatch enqueued.
 
 - Out-of-band: the guest opens the DocuSign email and signs. No app action; DocuSign
   fires a Connect webhook when the envelope reaches `completed`.
+- **Nudge (owner, optional):** the detail page's "Send reminder via DocuSign" button →
+  `POST /bookings/{id}/docusign-reminder` (`send_docusign_reminder`). It is DocuSign's own
+  Resend/Remind: `Envelopes::update` with `resend_envelope=true` on the **same** envelope
+  (`remind_envelope`, handlers/docusign.py), so `external_ref` and the webhook match are
+  unchanged and no second envelope is consumed. Offered only while the booking is active,
+  `DOCUSIGN_SEND` is COMPLETE with an `external_ref`, and `signed_pdf_path` is NULL
+  (`_reminder_envelope_id`). Success stamps `booking.docusign_last_reminded_at`
+  (revision 0008); a DocuSign rejection re-renders the page with the error and records
+  nothing. Independent of the automatic DocuSign reminder configured at send time
+  (one, 7 days after send) and of the owner-facing unsigned alerts in Step 7.
 
 ---
 

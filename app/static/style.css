@@ -313,6 +313,39 @@ input[aria-invalid="true"] {
   margin-top: var(--space-xs);
 }
 
+/* Secondary action inside a table cell (the DocuSign reminder button). */
+.inline-action {
+  display: inline-block;
+  margin-left: var(--space-sm);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--color-accent);
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-accent);
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  background: var(--color-accent);
+  color: #ffffff;
+}
+
+.reminder-history {
+  display: block;
+  margin-top: var(--space-xs);
+}
+
+.notice {
+  color: var(--color-accent);
+  font-size: 14px;
+  margin: 0 0 var(--space-sm);
+}
+
 /* --------------------------------------------------------------------------
    8. Details / Summary (collapsed failed-task errors)
    -------------------------------------------------------------------------- */

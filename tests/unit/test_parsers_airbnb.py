@@ -339,3 +339,81 @@ def test_year_inference_same_day_as_message_stays_same_year():
     )
     result = parse_airbnb_booking(msg)
     assert result.check_in_date == date(2026, 7, 22)
+
+
+# ---------------------------------------------------------------------------
+# Explicit year in the date line (real Airbnb layout for far-out bookings)
+# ---------------------------------------------------------------------------
+
+def test_explicit_year_in_date_line_overrides_inference():
+    """Regression (2026-09-19): a real confirmation received in Sep 2026 for a
+    stay in Dec 2027 rendered its date line as
+    ``Thu, Dec 23, 2027   Mon, Dec 27, 2027``. The parser matched only the
+    month and day, ignored the trailing year, and inferred 2026 from the Date
+    header — dating the stay a year early, on top of two real 2026 bookings.
+    When the email states the year, the parser must use it."""
+    from app.ingestion.parsers.airbnb import parse_airbnb_booking
+    msg = _make_airbnb_booking_msg_with_code(
+        date_header="Sat, 19 Sep 2026 23:23:16 +0000",
+        check_in_line="Thu, Dec 23, 2027",
+        check_out_token="Mon, Dec 27, 2027",
+    )
+    result = parse_airbnb_booking(msg)
+    assert result.check_in_date == date(2027, 12, 23)
+    assert result.check_out_date == date(2027, 12, 27)
+
+
+def test_explicit_year_crossing_new_year():
+    """Each column carries its own year, so a stay that wraps the year boundary
+    takes each date's stated year."""
+    from app.ingestion.parsers.airbnb import parse_airbnb_booking
+    msg = _make_airbnb_booking_msg_with_code(
+        date_header="Sat, 19 Sep 2026 23:23:16 +0000",
+        check_in_line="Thu, Dec 30, 2027",
+        check_out_token="Sun, Jan 2, 2028",
+    )
+    result = parse_airbnb_booking(msg)
+    assert result.check_in_date == date(2027, 12, 30)
+    assert result.check_out_date == date(2028, 1, 2)
+
+
+def test_explicit_year_wins_even_when_inference_would_disagree():
+    """An explicit year is authoritative even where inference would roll
+    forward: an email sent Jul 22 for 'Jul 10, 2026' is what it says."""
+    from app.ingestion.parsers.airbnb import parse_airbnb_booking
+    msg = _make_airbnb_booking_msg_with_code(
+        date_header="Wed, 22 Jul 2026 15:00:00 +0000",
+        check_in_line="Fri, Jul 10, 2026",
+        check_out_token="Sun, Jul 12, 2026",
+    )
+    result = parse_airbnb_booking(msg)
+    assert result.check_in_date == date(2026, 7, 10)
+    assert result.check_out_date == date(2026, 7, 12)
+
+
+def test_explicit_year_in_real_format_layout():
+    """The real layout separates the two columns with exactly three spaces and
+    is followed by the ``4:00 PM   11:00 AM`` line; the year must not break
+    the column split."""
+    from app.ingestion.parsers.airbnb import parse_airbnb_booking
+    raw = (
+        "From: Airbnb <automated@airbnb.com>\r\n"
+        "Date: Sat, 19 Sep 2026 23:23:16 +0000\r\n"
+        "Subject: Reservation confirmed - Alex Riverstone arrives Dec 23\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n"
+        "\r\n"
+        "NEW BOOKING CONFIRMED! ALEX ARRIVES DEC 23.\n"
+        "\n"
+        "Check-in            Checkout\n"
+        "                    \n"
+        "Thu, Dec 23, 2027   Mon, Dec 27, 2027\n"
+        "                    \n"
+        "4:00 PM             11:00 AM\n"
+        "\n"
+        "CONFIRMATION CODE\n"
+        "HMFAKE1234\n"
+    )
+    msg = email_lib.message_from_string(raw, policy=policy.default)
+    result = parse_airbnb_booking(msg)
+    assert result.check_in_date == date(2027, 12, 23)
+    assert result.check_out_date == date(2027, 12, 27)

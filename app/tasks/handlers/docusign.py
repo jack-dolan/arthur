@@ -316,3 +316,28 @@ def void_envelope_idempotent(envelope_id: str) -> None:
             )
             return
         raise
+
+
+# ---------------------------------------------------------------------------
+# Reminder (dashboard "Send reminder via DocuSign" button)
+# ---------------------------------------------------------------------------
+
+
+def remind_envelope(envelope_id: str) -> None:
+    """Resend the signing email for an envelope the guest has not signed yet.
+
+    This is what the DocuSign web app calls "Resend" and the mobile app calls
+    "Remind": Envelopes::update with ``resend_envelope=true`` and an otherwise
+    empty body. The envelope itself is unchanged - same id, same recipients,
+    same status - so the completed webhook still matches the stored
+    ``external_ref`` and no second envelope is consumed from the plan.
+
+    Nothing is swallowed. A 400 (envelope already completed, voided or
+    declined) is a real failure the caller must surface: there is no
+    "already reminded" state that would make it harmless.
+    """
+    envelopes_api, account_id = get_envelope_api()
+    envelopes_api.update(
+        account_id, envelope_id, envelope=ds.Envelope(), resend_envelope="true"
+    )
+    log.info("Resent DocuSign envelope %s (reminder)", envelope_id)

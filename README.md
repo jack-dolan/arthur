@@ -112,8 +112,10 @@ booking looks wrong, the dashboard shows where each value came from.
 ## The dashboard
 
 Read-mostly, behind per-user Google sign-in with an email allowlist that gets
-re-checked on every request. There is one write path, the contact form, because
-guest phone numbers and email addresses have to be typed in by hand.
+re-checked on every request. There are two write paths. The contact form exists
+because guest phone numbers and email addresses have to be typed in by hand. The
+"Send reminder via DocuSign" button on a booking resends the signing email for an
+envelope the guest has not signed yet, and records when it was last pressed.
 
 ![Booking list](docs/images/dashboard-list.png)
 
