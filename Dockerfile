@@ -34,7 +34,7 @@
 # avoided until both build hosts were verified able to pull anonymously
 # (2026-07-28). Builds now happen on GitHub's runners in any case; the VPS
 # path was the one that broke.
-FROM ghcr.io/astral-sh/uv:0.12.2 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.17 AS uv
 
 # --- builder: uv + the locked dependency set, into /opt/venv -----------------
 FROM python:3.14-slim AS builder

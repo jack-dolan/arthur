@@ -4,8 +4,8 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",
-    "uvicorn[standard]>=0.52.1",
-    "sqlalchemy[asyncio]>=2.0.51",
+    "uvicorn[standard]>=0.52.3",
+    "sqlalchemy[asyncio]>=2.0.52",
     "asyncpg>=0.30.0",
     "alembic>=1.19.0",
     "psycopg2-binary>=2.9.10",
@@ -21,9 +21,9 @@ dependencies = [
     "jinja2>=3.1.6",
     "apscheduler>=3.11.3",
     "docusign-esign>=6.1.0",
-    "seam>=1.209.1",
+    "seam>=3.14.1",
     # Claude API, used only by the weekly inbox drift reviewer (alert-only).
-    "anthropic>=0.69.0",
+    "anthropic>=1.6.0",
     # Dashboard login via Google OIDC ("Sign in with Google"). authlib handles
     # the OAuth2/OpenID-Connect flow + id_token verification; itsdangerous backs
     # Starlette's SessionMiddleware (signed session cookie).
